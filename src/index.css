@@ -1,0 +1,157 @@
+@import "tailwindcss";
+
+/* ============================================================
+   Synapse V3 — Design System Tokens
+   ============================================================ */
+
+@theme {
+  /* Backgrounds (Light Theme) */
+  --color-bg-frame: #f0f0f0;
+  --color-bg-content: #f7f7f7;
+  --color-bg-card: #ffffff;
+  --color-bg-inset: #f0f0f0;
+  --color-bg-hover: #fafafa;
+  --color-bg-active: #f0f0f0;
+
+  /* Text */
+  --color-text-primary: #1a1a1a;
+  --color-text-body: #3d3d3d;
+  --color-text-secondary: #808080;
+  --color-text-placeholder: #aaaaaa;
+
+  /* Borders */
+  --color-border-subtle: #0f0f0f0f;
+  --color-border-default: #0000001a;
+  --color-border-strong: #00000029;
+
+  /* Accent — Blood Orange */
+  --color-accent-50: #fff5f0;
+  --color-accent-100: #ffe0cc;
+  --color-accent-200: #ffb899;
+  --color-accent-300: #ff9466;
+  --color-accent-400: #e8703d;
+  --color-accent-500: #d63a00;
+  --color-accent-600: #b83300;
+  --color-accent-700: #9a2c00;
+  --color-accent-800: #6e2000;
+  --color-accent-900: #441400;
+
+  /* Semantic Colors */
+  --color-semantic-red-50: #fef2f2;
+  --color-semantic-red-500: #ef4444;
+  --color-semantic-red-700: #b91c1c;
+  --color-semantic-green-50: #f0fdf4;
+  --color-semantic-green-500: #22c55e;
+  --color-semantic-green-700: #15803d;
+  --color-semantic-amber-50: #fffbeb;
+  --color-semantic-amber-500: #f59e0b;
+  --color-semantic-amber-700: #b45309;
+  --color-semantic-blue-50: #eff6ff;
+  --color-semantic-blue-500: #3b82f6;
+  --color-semantic-blue-700: #1d4ed8;
+
+  /* Entity Type Colors */
+  --color-e-person: #d97706;
+  --color-e-org: #7c3aed;
+  --color-e-topic: #0891b2;
+  --color-e-project: #059669;
+  --color-e-goal: #e11d48;
+  --color-e-decision: #db2777;
+  --color-e-action: #2563eb;
+  --color-e-risk: #dc2626;
+  --color-e-insight: #7c3aed;
+  --color-e-idea: #ca8a04;
+  --color-e-blocker: #dc2626;
+  --color-e-tech: #0d9488;
+  --color-e-concept: #4f46e5;
+  --color-e-question: #ea580c;
+  --color-e-anchor: #b45309;
+  --color-e-lesson: #65a30d;
+
+  /* Typography */
+  --font-display: 'Cabinet Grotesk', -apple-system, sans-serif;
+  --font-body: 'DM Sans', -apple-system, sans-serif;
+  --font-editorial: 'Instrument Serif', Georgia, serif;
+
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 36px;
+  --spacing-2xl: 48px;
+
+  /* Radius */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+}
+
+/* ============================================================
+   CSS Custom Properties (rgba variants for direct use)
+   ============================================================ */
+
+:root {
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-default: rgba(0, 0, 0, 0.10);
+  --border-strong: rgba(0, 0, 0, 0.16);
+}
+
+/* ============================================================
+   Global Resets & Base Styles
+   ============================================================ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+input,
+textarea,
+button,
+select {
+  font-family: inherit;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--color-bg-content);
+  color: var(--color-text-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Focus-visible */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-accent-50);
+  border-color: rgba(214, 58, 0, 0.3);
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+/* Spinner animation */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
