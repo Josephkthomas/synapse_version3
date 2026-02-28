@@ -1,14 +1,38 @@
 import { createContext, useState, useEffect, useCallback, type ReactNode } from 'react'
-import { supabase } from '../../services/supabase'
+import {
+  fetchOrCreateProfile,
+  fetchOrCreateExtractionSettings,
+  updateProfile as updateProfileService,
+  updateExtractionSettings as updateExtractionSettingsService,
+  promoteToAnchor as promoteToAnchorService,
+  demoteAnchor as demoteAnchorService,
+  supabase,
+} from '../../services/supabase'
 import type { KnowledgeNode, UserProfile, ExtractionSettings } from '../../types/database'
 
+type ProfileUpdates = Partial<{
+  professional_context: Record<string, string>
+  personal_interests: Record<string, string>
+  processing_preferences: Record<string, string>
+}>
+
 export interface SettingsContextValue {
+  // Read
   profile: UserProfile | null
   extractionSettings: ExtractionSettings | null
   anchors: KnowledgeNode[]
   loading: boolean
+
+  // Write
+  updateProfile: (updates: ProfileUpdates) => Promise<{ error: Error | null }>
+  updateExtractionSettings: (updates: Partial<{ default_mode: string; default_anchor_emphasis: string }>) => Promise<{ error: Error | null }>
+  promoteToAnchor: (nodeId: string) => Promise<{ error: Error | null }>
+  demoteAnchor: (nodeId: string) => Promise<{ error: Error | null }>
+
+  // Refresh
   refreshAnchors: () => Promise<void>
   refreshProfile: () => Promise<void>
+  refreshExtractionSettings: () => Promise<void>
 }
 
 export const SettingsContext = createContext<SettingsContextValue | null>(null)
@@ -29,30 +53,71 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const refreshProfile = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-
-    const { data } = await supabase
-      .from('user_profiles')
-      .select('*')
-      .eq('user_id', user.id)
-      .maybeSingle()
-    if (data) setProfile(data as UserProfile)
-
-    const { data: settings } = await supabase
-      .from('extraction_settings')
-      .select('*')
-      .eq('user_id', user.id)
-      .maybeSingle()
-    if (settings) setExtractionSettings(settings as ExtractionSettings)
+    const data = await fetchOrCreateProfile()
+    if (data) setProfile(data)
   }, [])
 
+  const refreshExtractionSettings = useCallback(async () => {
+    const data = await fetchOrCreateExtractionSettings()
+    if (data) setExtractionSettings(data)
+  }, [])
+
+  const updateProfileFn = useCallback(async (updates: ProfileUpdates) => {
+    const result = await updateProfileService(updates)
+    if (!result.error) {
+      setProfile(prev =>
+        prev ? { ...prev, ...updates } as UserProfile : null
+      )
+    }
+    return result
+  }, [])
+
+  const updateExtractionSettingsFn = useCallback(async (
+    updates: Partial<{ default_mode: string; default_anchor_emphasis: string }>
+  ) => {
+    const result = await updateExtractionSettingsService(updates)
+    if (!result.error) {
+      setExtractionSettings(prev =>
+        prev ? { ...prev, ...updates } as ExtractionSettings : null
+      )
+    }
+    return result
+  }, [])
+
+  const promoteToAnchorFn = useCallback(async (nodeId: string) => {
+    const result = await promoteToAnchorService(nodeId)
+    if (!result.error) await refreshAnchors()
+    return result
+  }, [refreshAnchors])
+
+  const demoteAnchorFn = useCallback(async (nodeId: string) => {
+    const result = await demoteAnchorService(nodeId)
+    if (!result.error) await refreshAnchors()
+    return result
+  }, [refreshAnchors])
+
   useEffect(() => {
-    Promise.all([refreshProfile(), refreshAnchors()]).finally(() => setLoading(false))
-  }, [refreshProfile, refreshAnchors])
+    Promise.all([
+      refreshProfile(),
+      refreshExtractionSettings(),
+      refreshAnchors(),
+    ]).finally(() => setLoading(false))
+  }, [refreshProfile, refreshExtractionSettings, refreshAnchors])
 
   return (
-    <SettingsContext.Provider value={{ profile, extractionSettings, anchors, loading, refreshAnchors, refreshProfile }}>
+    <SettingsContext.Provider value={{
+      profile,
+      extractionSettings,
+      anchors,
+      loading,
+      updateProfile: updateProfileFn,
+      updateExtractionSettings: updateExtractionSettingsFn,
+      promoteToAnchor: promoteToAnchorFn,
+      demoteAnchor: demoteAnchorFn,
+      refreshAnchors,
+      refreshProfile,
+      refreshExtractionSettings,
+    }}>
       {children}
     </SettingsContext.Provider>
   )

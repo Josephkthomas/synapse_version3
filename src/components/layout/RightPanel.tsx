@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Anchor, Clock, X, Sparkles } from 'lucide-react'
+import { Anchor, Clock, Sparkles } from 'lucide-react'
 import { useGraphContext } from '../../hooks/useGraphContext'
 import { useSettings } from '../../hooks/useSettings'
 import { supabase } from '../../services/supabase'
 import { Dot } from '../ui/Dot'
 import { SectionLabel } from '../ui/SectionLabel'
+import { NodeDetail } from '../panels/NodeDetail'
+import { SourceDetail } from '../panels/SourceDetail'
 import type { KnowledgeNode } from '../../types/database'
 
 function formatRelativeTime(dateStr: string): string {
@@ -113,36 +115,6 @@ function QuickAccess() {
   )
 }
 
-function NodeDetailPlaceholder({ node, onClose }: { node: KnowledgeNode; onClose: () => void }) {
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <Dot type={node.entity_type} size={10} />
-          <span className="font-display text-[14px] font-bold text-text-primary">{node.label}</span>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="flex items-center justify-center w-6 h-6 border-none cursor-pointer rounded-md hover:bg-bg-hover"
-          style={{ background: 'transparent' }}
-        >
-          <X size={14} style={{ color: 'var(--color-text-secondary)' }} />
-        </button>
-      </div>
-      <div className="flex items-center gap-2 mb-3">
-        <span className="font-body text-[11px] font-medium text-text-secondary px-2 py-0.5 rounded bg-bg-inset">
-          {node.entity_type}
-        </span>
-      </div>
-      {node.description && (
-        <p className="font-body text-[12px] text-text-secondary leading-relaxed">
-          {node.description}
-        </p>
-      )}
-    </div>
-  )
-}
 
 function AskContextPlaceholder() {
   return (
@@ -183,22 +155,19 @@ export function RightPanel() {
       return <AskContextPlaceholder />
     }
     if (rightPanelContent?.type === 'node') {
-      return <NodeDetailPlaceholder node={rightPanelContent.data} onClose={clearRightPanel} />
+      return <NodeDetail node={rightPanelContent.data} onClose={clearRightPanel} />
     }
     if (rightPanelContent?.type === 'source') {
-      return (
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <SectionLabel>Source Detail</SectionLabel>
-            <button type="button" onClick={clearRightPanel} className="flex items-center justify-center w-6 h-6 border-none cursor-pointer rounded-md hover:bg-bg-hover" style={{ background: 'transparent' }}>
-              <X size={14} style={{ color: 'var(--color-text-secondary)' }} />
-            </button>
-          </div>
-          <p className="font-body text-[12px] text-text-placeholder">Source detail — coming in a future update.</p>
-        </div>
-      )
+      return <SourceDetail source={rightPanelContent.data} onClose={clearRightPanel} />
     }
     return <QuickAccess />
+  }
+
+  const panelTitle = () => {
+    if (!rightPanelContent) return isAskView ? 'Context' : 'Quick Access'
+    if (rightPanelContent.type === 'node') return 'Entity Detail'
+    if (rightPanelContent.type === 'source') return 'Source Detail'
+    return 'Detail'
   }
 
   return (
@@ -218,7 +187,7 @@ export function RightPanel() {
         }}
       >
         <span className="font-display text-[12px] font-bold text-text-secondary uppercase tracking-[0.06em]">
-          {rightPanelContent ? (rightPanelContent.type === 'node' ? 'Entity Detail' : 'Detail') : isAskView ? 'Context' : 'Quick Access'}
+          {panelTitle()}
         </span>
       </div>
 

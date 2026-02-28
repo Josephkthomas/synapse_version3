@@ -1,13 +1,117 @@
+import { useState, useCallback } from 'react'
+import { List, LayoutGrid } from 'lucide-react'
+import { BrowseTab } from './explore/BrowseTab'
+import { GraphTab } from '../components/explore/GraphTab'
+
+type Tab = 'graph' | 'browse'
+type ViewMode = 'table' | 'cards'
+
 export function ExploreView() {
+  const [activeTab, setActiveTab] = useState<Tab>('graph')
+  const [viewMode, setViewMode] = useState<ViewMode>('table')
+  const [totalCount, setTotalCount] = useState(0)
+
+  const handleTotalCountChange = useCallback((count: number) => {
+    setTotalCount(count)
+  }, [])
+
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="max-w-[840px] mx-auto" style={{ padding: '40px 48px' }}>
-        <h1 className="font-display text-[26px] font-extrabold tracking-tight text-text-primary mb-2">
-          Explore
-        </h1>
-        <p className="font-body text-[13px] text-text-secondary leading-relaxed">
-          Graph visualization and entity browser — coming in the next update.
-        </p>
+    <div className="flex flex-col h-full" style={{ background: 'var(--color-bg-content)' }}>
+      {/* Tab bar */}
+      <div
+        className="flex items-center shrink-0 px-4"
+        style={{
+          height: 44,
+          background: 'var(--color-bg-card)',
+          borderBottom: '1px solid var(--border-subtle)',
+        }}
+      >
+        {/* Tabs */}
+        <div className="flex items-center gap-0 h-full">
+          {(['graph', 'browse'] as Tab[]).map(tab => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              className="relative h-full px-4 font-body text-[12px] font-semibold cursor-pointer"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: activeTab === tab ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+                borderBottom: activeTab === tab ? '2px solid var(--color-accent-500)' : '2px solid transparent',
+                transition: 'color 0.15s ease, border-color 0.15s ease',
+                marginBottom: -1,
+              }}
+            >
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </button>
+          ))}
+        </div>
+
+        {/* Result count */}
+        {activeTab === 'browse' && totalCount > 0 && (
+          <span className="font-body text-[11px] text-text-secondary ml-4">
+            {totalCount.toLocaleString()} entities
+          </span>
+        )}
+
+        <div className="flex-1" />
+
+        {/* View toggle — Browse only */}
+        {activeTab === 'browse' && (
+          <div
+            className="flex items-center rounded-lg p-0.5"
+            style={{ background: 'var(--color-bg-inset)' }}
+          >
+            <button
+              type="button"
+              onClick={() => setViewMode('table')}
+              className="flex items-center justify-center w-7 h-7 rounded-md cursor-pointer"
+              style={{
+                background: viewMode === 'table' ? 'var(--color-bg-card)' : 'transparent',
+                border: 'none',
+                boxShadow: viewMode === 'table' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
+                transition: 'all 0.15s ease',
+              }}
+              aria-label="Table view"
+              title="Table view"
+            >
+              <List
+                size={14}
+                style={{ color: viewMode === 'table' ? 'var(--color-text-primary)' : 'var(--color-text-secondary)' }}
+              />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('cards')}
+              className="flex items-center justify-center w-7 h-7 rounded-md cursor-pointer"
+              style={{
+                background: viewMode === 'cards' ? 'var(--color-bg-card)' : 'transparent',
+                border: 'none',
+                boxShadow: viewMode === 'cards' ? '0 1px 3px rgba(0,0,0,0.06)' : 'none',
+                transition: 'all 0.15s ease',
+              }}
+              aria-label="Card view"
+              title="Card view"
+            >
+              <LayoutGrid
+                size={14}
+                style={{ color: viewMode === 'cards' ? 'var(--color-text-primary)' : 'var(--color-text-secondary)' }}
+              />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Tab content */}
+      <div className="flex-1 overflow-hidden">
+        {activeTab === 'graph' && <GraphTab />}
+        {activeTab === 'browse' && (
+          <BrowseTab
+            viewMode={viewMode}
+            onTotalCountChange={handleTotalCountChange}
+          />
+        )}
       </div>
     </div>
   )
