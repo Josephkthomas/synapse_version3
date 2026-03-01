@@ -1,14 +1,18 @@
-import { embedQuery, generateRAGResponse } from './gemini'
+import { generateRAGResponse, decomposeQuery, embedQuery } from './gemini'
 import {
-  semanticSearchChunks,
+  keywordSearchChunks,
+  fetchChunksForSources,
   keywordSearchNodes,
   keywordSearchSources,
+  semanticSearchChunks,
+  semanticSearchNodes,
   traverseGraphFromNodes,
   fetchSourcesByIds,
   fetchNodesByIds,
+  fetchTopNodes,
 } from './supabase'
 import type {
-  RAGPipelineStep,
+  RAGStepEvent,
   RAGContext,
   RAGResponseContext,
   EnrichedChunk,
@@ -19,68 +23,140 @@ import type {
   KeywordNodeResult,
   KeywordSourceResult,
 } from '../types/rag'
+import type { SemanticNodeResult } from './supabase'
 import type { KnowledgeNode, KnowledgeEdge } from '../types/database'
 
-// ─── Merge & Rerank ───────────────────────────────────────────────────────────
+// ─── Deduplication Helpers ────────────────────────────────────────────────────
 
-interface MergedResult {
-  topChunks: SemanticChunkResult[]
-  allSourceIds: Set<string>
+function deduplicateNodes(nodes: KnowledgeNode[]): KnowledgeNode[] {
+  const seen = new Set<string>()
+  return nodes.filter(n => { if (seen.has(n.id)) return false; seen.add(n.id); return true })
 }
 
-function mergeAndRerank(
-  semanticChunks: SemanticChunkResult[],
-  keywordNodes: KeywordNodeResult[],
-  keywordSources: KeywordSourceResult[]
-): MergedResult {
-  const allSourceIds = new Set<string>()
-
-  for (const node of keywordNodes) {
-    if (node.source_id) allSourceIds.add(node.source_id)
-  }
-  for (const source of keywordSources) {
-    allSourceIds.add(source.id)
-  }
-  for (const chunk of semanticChunks) {
-    allSourceIds.add(chunk.source_id)
-  }
-
-  // Boost chunks from keyword-matched sources (cross-signal reinforcement)
-  const boostedChunks = semanticChunks.map(chunk => ({
-    ...chunk,
-    similarity: allSourceIds.has(chunk.source_id)
-      ? Math.min(chunk.similarity * 1.15, 1.0)
-      : chunk.similarity,
-  }))
-
-  boostedChunks.sort((a, b) => b.similarity - a.similarity)
-
-  return { topChunks: boostedChunks, allSourceIds }
+function deduplicateKeywordNodes(nodes: KeywordNodeResult[]): KeywordNodeResult[] {
+  const seen = new Set<string>()
+  return nodes.filter(n => { if (seen.has(n.id)) return false; seen.add(n.id); return true })
 }
 
-// ─── Seed Node Extraction ─────────────────────────────────────────────────────
-
-function extractSeedNodeIds(
-  _mergedResult: MergedResult,
-  keywordNodes: KeywordNodeResult[]
-): string[] {
-  const ids = new Set<string>()
-  for (const node of keywordNodes) {
-    ids.add(node.id)
-  }
-  return Array.from(ids)
+function deduplicateChunks(chunks: SemanticChunkResult[]): SemanticChunkResult[] {
+  const seen = new Set<string>()
+  return chunks.filter(c => { if (seen.has(c.id)) return false; seen.add(c.id); return true })
 }
 
-// ─── Enrich Chunks with Source Metadata ───────────────────────────────────────
+function deduplicateSources(sources: KeywordSourceResult[]): KeywordSourceResult[] {
+  const seen = new Set<string>()
+  return sources.filter(s => { if (seen.has(s.id)) return false; seen.add(s.id); return true })
+}
 
-async function enrichChunksWithSourceMetadata(
-  chunks: SemanticChunkResult[]
-): Promise<EnrichedChunk[]> {
+// ─── Source-balanced Chunk Selection ─────────────────────────────────────────
+
+/**
+ * Selects up to `maxTotal` chunks while guaranteeing at least `minPerSource`
+ * from each source that has chunks available. This prevents any single source
+ * from dominating the context window on comparison queries.
+ *
+ * Pass-1: take minPerSource from each source (in ranked order within source).
+ * Pass-2: fill remaining slots with the highest-ranked chunks not yet selected.
+ * Final: re-sort by similarity so Gemini sees the strongest evidence first.
+ */
+function balanceChunksBySource(
+  ranked: SemanticChunkResult[],
+  maxTotal: number,
+  minPerSource: number
+): SemanticChunkResult[] {
+  const bySource = new Map<string, SemanticChunkResult[]>()
+  for (const chunk of ranked) {
+    if (!bySource.has(chunk.source_id)) bySource.set(chunk.source_id, [])
+    bySource.get(chunk.source_id)!.push(chunk)
+  }
+
+  const selected = new Set<string>()
+  const result: SemanticChunkResult[] = []
+
+  // Pass 1: guarantee minimum coverage per source
+  for (const sourceChunks of bySource.values()) {
+    for (const chunk of sourceChunks.slice(0, minPerSource)) {
+      if (!selected.has(chunk.id)) {
+        selected.add(chunk.id)
+        result.push(chunk)
+      }
+    }
+  }
+
+  // Pass 2: fill remainder with top-ranked across all sources
+  for (const chunk of ranked) {
+    if (result.length >= maxTotal) break
+    if (!selected.has(chunk.id)) {
+      selected.add(chunk.id)
+      result.push(chunk)
+    }
+  }
+
+  return result.sort((a, b) => b.similarity - a.similarity)
+}
+
+// ─── Lightweight Reranking (Approach 4) ──────────────────────────────────────
+
+/**
+ * Hybrid reranking: combines keyword term-frequency with semantic cosine similarity.
+ *
+ * Scoring formula per chunk:
+ *   base similarity  (1.0 for keyword/source chunks; cosine score for semantic-only)
+ *   + each matching query term adds 0.05
+ *   + if also found by semantic search: cosine_similarity × 0.3 bonus
+ *
+ * Chunks found by BOTH keyword and semantic search rank highest.
+ * Pure semantic chunks with high cosine similarity can outrank pure keyword chunks.
+ * Low-similarity semantic-only chunks (threshold 0.4) score below keyword chunks.
+ */
+function scoreChunks(
+  chunks: SemanticChunkResult[],
+  question: string,
+  semanticScores?: Map<string, number>
+): SemanticChunkResult[] {
+  const terms = question
+    .toLowerCase()
+    .split(/\s+/)
+    .map(w => w.replace(/[^a-z0-9]/g, ''))
+    .filter(w => w.length >= 3)
+
+  return chunks
+    .map(chunk => {
+      const lc = chunk.content.toLowerCase()
+      const termHits = terms.filter(t => lc.includes(t)).length
+      const semanticSimilarity = semanticScores?.get(chunk.id) ?? 0
+      return { ...chunk, similarity: chunk.similarity + termHits * 0.05 + semanticSimilarity * 0.3 }
+    })
+    .sort((a, b) => b.similarity - a.similarity)
+}
+
+// ─── Context Builders ─────────────────────────────────────────────────────────
+
+function buildRelationshipPaths(
+  nodes: KnowledgeNode[],
+  edges: KnowledgeEdge[]
+): RelationshipPath[] {
+  const nodeMap = new Map<string, string>()
+  for (const node of nodes) nodeMap.set(node.id, node.label)
+  const paths: RelationshipPath[] = []
+  for (const edge of edges) {
+    const from = nodeMap.get(edge.source_node_id)
+    const to = nodeMap.get(edge.target_node_id)
+    if (!from || !to) continue
+    paths.push({
+      from,
+      relation: edge.relation_type ?? 'relates_to',
+      to,
+      evidence: edge.evidence ?? undefined,
+    })
+  }
+  return paths
+}
+
+async function enrichChunks(chunks: SemanticChunkResult[]): Promise<EnrichedChunk[]> {
   if (chunks.length === 0) return []
-
   const sourceIds = chunks.map(c => c.source_id)
   const sourceMap = await fetchSourcesByIds(sourceIds)
-
   return chunks.map(chunk => {
     const source = sourceMap.get(chunk.source_id)
     return {
@@ -95,55 +171,6 @@ async function enrichChunksWithSourceMetadata(
   })
 }
 
-// ─── Deduplication ────────────────────────────────────────────────────────────
-
-function deduplicateNodes(nodes: KnowledgeNode[]): KnowledgeNode[] {
-  const seen = new Set<string>()
-  return nodes.filter(n => {
-    if (seen.has(n.id)) return false
-    seen.add(n.id)
-    return true
-  })
-}
-
-function deduplicateKeywordNodes(nodes: KeywordNodeResult[]): KeywordNodeResult[] {
-  const seen = new Set<string>()
-  return nodes.filter(n => {
-    if (seen.has(n.id)) return false
-    seen.add(n.id)
-    return true
-  })
-}
-
-// ─── Relationship Path Builder ────────────────────────────────────────────────
-
-function buildRelationshipPaths(
-  nodes: KnowledgeNode[],
-  edges: KnowledgeEdge[]
-): RelationshipPath[] {
-  const nodeMap = new Map<string, string>()
-  for (const node of nodes) {
-    nodeMap.set(node.id, node.label)
-  }
-
-  const paths: RelationshipPath[] = []
-  for (const edge of edges) {
-    const from = nodeMap.get(edge.source_node_id)
-    const to = nodeMap.get(edge.target_node_id)
-    if (!from || !to) continue
-
-    paths.push({
-      from,
-      relation: edge.relation_type ?? 'relates_to',
-      to,
-      evidence: edge.evidence ?? undefined,
-    })
-  }
-  return paths
-}
-
-// ─── Citation Resolution ──────────────────────────────────────────────────────
-
 async function resolveCitations(
   rawCitations: Citation[],
   _userId: string
@@ -151,22 +178,22 @@ async function resolveCitations(
   const nodeIds = rawCitations
     .map(c => c.node_id)
     .filter((id): id is string => id !== null && id.length > 0)
-
   if (nodeIds.length === 0) return rawCitations
-
   const nodes = await fetchNodesByIds(nodeIds)
   const nodeMap = new Map(nodes.map(n => [n.id, n]))
-
   return rawCitations.map(citation => {
     if (!citation.node_id) return citation
     const node = nodeMap.get(citation.node_id)
     if (!node) return citation
-    return {
-      ...citation,
-      label: node.label,
-      entity_type: node.entity_type,
-    }
+    return { ...citation, label: node.label, entity_type: node.entity_type }
   })
+}
+
+function formatSourceContext(sources: KeywordSourceResult[]): string {
+  if (sources.length === 0) return ''
+  return sources
+    .map(s => `- "${s.title ?? 'Untitled'}" (${s.source_type ?? 'Document'}, ${new Date(s.created_at).toLocaleDateString()})`)
+    .join('\n')
 }
 
 // ─── Main RAG Pipeline ────────────────────────────────────────────────────────
@@ -179,103 +206,187 @@ export interface RAGResponse {
   relatedEdges: KnowledgeEdge[]
 }
 
+/**
+ * 5-approach RAG pipeline:
+ *
+ * Approach 1 — Source Chunk Retrieval:
+ *   Source-first: find relevant documents by title → pull their chunks in order.
+ *   Fallback: keyword search across all chunk content.
+ *
+ * Approach 2 — Hybrid Search:
+ *   Keyword search on sources, nodes, and chunks in parallel.
+ *   (Semantic/vector search blocked by embedding dimension mismatch in DB —
+ *   requires server-side re-embedding to fix.)
+ *
+ * Approach 3 — Graph Traversal:
+ *   2-hop expansion from keyword-matched entity nodes, up to 50 context nodes.
+ *
+ * Approach 4 — Reranking:
+ *   Lightweight term-frequency reranking of retrieved chunks before sending to Gemini.
+ *
+ * Approach 5 — Query Decomposition:
+ *   Complex multi-concept queries are decomposed into 2-3 sub-queries by Gemini.
+ *   Each sub-query runs its own retrieval pass; results are merged and deduplicated.
+ */
 export async function queryGraph(
   question: string,
   userId: string,
   conversationHistory: { role: string; content: string }[],
-  onStepChange?: (step: RAGPipelineStep) => void,
+  onStepChange?: (event: RAGStepEvent) => void,
   signal?: AbortSignal
 ): Promise<RAGResponse> {
   const checkAbort = () => {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
   }
 
-  // ─── Step 1: Embed the query ───
-  onStepChange?.('embedding')
-  const queryEmbedding = await embedQuery(question)
+  // ─── Approach 5: Query Decomposition + Embedding (parallel) ──────────────
+  onStepChange?.({ step: 'embedding', status: 'running' })
+  const [subQueries, queryEmbedding] = await Promise.all([
+    decomposeQuery(question),
+    embedQuery(question),
+  ])
+  const hasEmbedding = queryEmbedding.length > 0
+  console.debug('[rag] sub-queries:', subQueries, '| embedding:', hasEmbedding ? '3072-dim' : 'failed (keyword-only fallback)')
+  onStepChange?.({ step: 'embedding', status: 'done', subQueries, hasEmbedding })
   checkAbort()
 
-  // ─── Step 2: Parallel hybrid search ───
-  onStepChange?.('semantic_search')
-  const [semanticResults, keywordNodeResults, keywordSourceResults] = await Promise.all([
-    semanticSearchChunks(queryEmbedding, userId, { matchThreshold: 0.5, matchCount: 15 }),
-    keywordSearchNodes(question, userId, { limit: 10 }),
-    keywordSearchSources(question, userId, { limit: 5 }),
+  // ─── Approach 2: Hybrid retrieval — keyword + semantic in parallel ─────────
+  onStepChange?.({ step: 'semantic_search', status: 'running' })
+
+  const [retrievalResults, semanticChunks, semanticNodes] = await Promise.all([
+    // Keyword search per sub-query
+    Promise.all(
+      subQueries.map(sq =>
+        Promise.all([
+          keywordSearchSources(sq, userId, { limit: 4 }),
+          keywordSearchNodes(sq, userId, { limit: 8 }),
+        ])
+      )
+    ),
+    // Semantic chunk search (returns [] if no embedding)
+    hasEmbedding
+      ? semanticSearchChunks(queryEmbedding, userId, { matchThreshold: 0.4, matchCount: 15 })
+      : Promise.resolve([] as SemanticChunkResult[]),
+    // Semantic node search (returns [] if no embedding)
+    hasEmbedding
+      ? semanticSearchNodes(queryEmbedding, userId, { matchThreshold: 0.4, matchCount: 20 })
+      : Promise.resolve([] as SemanticNodeResult[]),
   ])
   checkAbort()
 
-  onStepChange?.('keyword_search')
+  // Merge and deduplicate across all sub-queries
+  const allSources = deduplicateSources(retrievalResults.flatMap(([s]) => s))
+  const allKeywordNodes = deduplicateKeywordNodes(retrievalResults.flatMap(([, n]) => n))
 
-  // ─── Step 3: Merge and rerank ───
-  const mergedResults = mergeAndRerank(semanticResults, keywordNodeResults, keywordSourceResults)
+  console.debug('[rag] sources:', allSources.length, '| keyword nodes:', allKeywordNodes.length, '| semantic chunks:', semanticChunks.length, '| semantic nodes:', semanticNodes.length)
+  onStepChange?.({ step: 'semantic_search', status: 'done', sources: allSources.length, keywordNodes: allKeywordNodes.length, semanticChunks: semanticChunks.length, semanticNodes: semanticNodes.length })
+  onStepChange?.({ step: 'keyword_search', status: 'running' })
 
-  // ─── Step 4: Graph traversal ───
-  onStepChange?.('graph_traversal')
-  const seedNodeIds = extractSeedNodeIds(mergedResults, keywordNodeResults)
+  // ─── Approach 1: Source-first (per-source) + keyword chunks + semantic chunks ──
+  // Fetch per-source so each document contributes up to 8 chunks independently.
+  // A shared limit (e.g. 20 across 4 sources) only returns ~5 intro chunks per source,
+  // missing the detailed content deeper in each document.
+  const [perSourceChunkArrays, keywordChunkArrays] = await Promise.all([
+    allSources.length > 0
+      ? Promise.all(allSources.map(s => fetchChunksForSources([s.id], userId, { limit: 8 })))
+      : Promise.resolve([] as SemanticChunkResult[][]),
+    Promise.all(subQueries.map(sq => keywordSearchChunks(sq, userId, { limit: 12 }))),
+  ])
+
+  // Merge all chunk sources; deduplicate by ID
+  const rawChunks = deduplicateChunks([
+    ...perSourceChunkArrays.flat(),
+    ...keywordChunkArrays.flat(),
+    ...semanticChunks,
+  ])
+
+  console.debug('[rag] raw chunks (merged):', rawChunks.length)
+  checkAbort()
+
+  // ─── Approach 4: Hybrid reranking + source-balanced selection ─────────────
+  const semanticScores = new Map(semanticChunks.map(c => [c.id, c.similarity]))
+  const rankedChunks = scoreChunks(rawChunks, question, semanticScores)
+
+  // When multiple sources are present, guarantee each source gets ≥2 slots before
+  // filling the remainder with the highest-ranked chunks from any source.
+  const finalChunkCount = Math.max(15, Math.min(20, allSources.length * 4))
+  const balancedChunks = balanceChunksBySource(rankedChunks, finalChunkCount, 2)
+  onStepChange?.({ step: 'keyword_search', status: 'done', rawChunks: rawChunks.length, rankedChunks: balancedChunks.length })
+
+  // ─── Approach 3: Graph traversal from keyword + semantic nodes ────────────
+  onStepChange?.({ step: 'graph_traversal', status: 'running' })
+
+  // Combine keyword and semantic node IDs as graph traversal seeds (deduplicated)
+  const combinedNodeIds = [...new Set([
+    ...allKeywordNodes.map(n => n.id),
+    ...semanticNodes.map(n => n.id),
+  ])]
+
+  let seedNodeIds = combinedNodeIds
+  let fallbackNodes: KeywordNodeResult[] = []
+
+  if (seedNodeIds.length === 0) {
+    fallbackNodes = await fetchTopNodes(userId, { limit: 12, anchorsOnly: true })
+    if (fallbackNodes.length === 0) {
+      fallbackNodes = await fetchTopNodes(userId, { limit: 12 })
+    }
+    seedNodeIds = fallbackNodes.map(n => n.id)
+  }
+
+  // Use up to 15 seeds (expanded from 10 now that semantic nodes contribute)
   const { nodes: graphNodes, edges: graphEdges } = seedNodeIds.length > 0
-    ? await traverseGraphFromNodes(seedNodeIds.slice(0, 10), userId, 2)
+    ? await traverseGraphFromNodes(seedNodeIds.slice(0, 15), userId, 2)
     : { nodes: [] as KnowledgeNode[], edges: [] as KnowledgeEdge[] }
+  onStepChange?.({ step: 'graph_traversal', status: 'done', seedNodes: seedNodeIds.length, graphNodes: graphNodes.length, graphEdges: graphEdges.length })
   checkAbort()
 
-  // ─── Step 5: Context assembly ───
-  onStepChange?.('context_assembly')
+  // ─── Context assembly ─────────────────────────────────────────────────────
+  onStepChange?.({ step: 'context_assembly', status: 'running' })
 
-  const enrichedChunks = await enrichChunksWithSourceMetadata(mergedResults.topChunks)
+  const enrichedChunks = await enrichChunks(balancedChunks)
   checkAbort()
 
-  // Build keyword node summaries
-  const kwNodeSummaries: NodeSummary[] = deduplicateKeywordNodes(keywordNodeResults)
-    .slice(0, 10)
-    .map(n => ({
-      id: n.id,
-      label: n.label,
-      entity_type: n.entity_type,
-      description: n.description,
-    }))
+  const effectiveKeywordNodes = allKeywordNodes.length > 0 ? allKeywordNodes : fallbackNodes
+  const kwNodeSummaries: NodeSummary[] = deduplicateKeywordNodes(effectiveKeywordNodes)
+    .slice(0, 12)
+    .map(n => ({ id: n.id, label: n.label, entity_type: n.entity_type, description: n.description }))
 
-  // Build graph node summaries
   const graphNodeSummaries: NodeSummary[] = deduplicateNodes(graphNodes)
-    .slice(0, 15)
-    .map(n => ({
-      id: n.id,
-      label: n.label,
-      entity_type: n.entity_type,
-      description: n.description ?? null,
-    }))
+    .slice(0, 20)
+    .map(n => ({ id: n.id, label: n.label, entity_type: n.entity_type, description: n.description ?? null }))
+
+  // Include top semantic nodes (high cosine similarity → most conceptually related)
+  const semanticNodeSummaries: NodeSummary[] = semanticNodes
+    .slice(0, 10)
+    .map(n => ({ id: n.id, label: n.label, entity_type: n.entity_type, description: n.description }))
 
   const allNodeSummaries = deduplicateKeywordNodes([
     ...kwNodeSummaries,
     ...graphNodeSummaries,
+    ...semanticNodeSummaries,
   ] as unknown as KeywordNodeResult[])
-    .slice(0, 20) as unknown as NodeSummary[]
+    .slice(0, 30) as unknown as NodeSummary[]
+
+  const sourceContextNote = formatSourceContext(allSources)
 
   const context: RAGContext = {
-    sourceChunks: enrichedChunks.slice(0, 8),
+    sourceChunks: enrichedChunks,
     nodeSummaries: allNodeSummaries,
-    relationshipPaths: buildRelationshipPaths(graphNodes, graphEdges).slice(0, 15),
+    relationshipPaths: buildRelationshipPaths(graphNodes, graphEdges).slice(0, 20),
   }
+  onStepChange?.({ step: 'context_assembly', status: 'done', contextChunks: enrichedChunks.length, contextNodes: allNodeSummaries.length, relationshipPaths: context.relationshipPaths.length })
 
-  // If no context at all, return a "no results" response without calling Gemini
-  if (enrichedChunks.length === 0 && kwNodeSummaries.length === 0) {
-    return {
-      answer: "I couldn't find any content in your knowledge graph related to that question. Try rephrasing, or check if the relevant content has been ingested and processed.",
-      citations: [],
-      sourceChunks: [],
-      relatedNodes: [],
-      relatedEdges: [],
-    }
-  }
-
-  // ─── Step 6: Generate response ───
-  onStepChange?.('generating')
+  // ─── Generate response ────────────────────────────────────────────────────
+  onStepChange?.({ step: 'generating', status: 'running' })
   const generationResult = await generateRAGResponse(
     context,
     question,
-    conversationHistory.slice(-6)
+    conversationHistory.slice(-6),
+    sourceContextNote
   )
   checkAbort()
 
-  // ─── Step 7: Resolve citations ───
+  // ─── Resolve citations ────────────────────────────────────────────────────
   const resolvedCitations = await resolveCitations(generationResult.citations, userId)
 
   return {
@@ -287,7 +398,7 @@ export async function queryGraph(
   }
 }
 
-// ─── Build RAGResponseContext from RAGResponse ────────────────────────────────
+// ─── Build RAGResponseContext ─────────────────────────────────────────────────
 
 export function buildRAGResponseContext(response: RAGResponse): RAGResponseContext {
   return {

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useRAGQuery } from '../hooks/useRAGQuery'
 import { useChatScroll } from '../hooks/useChatScroll'
@@ -10,20 +11,36 @@ import { EmptyAskState } from '../components/ask/EmptyAskState'
 
 export function AskView() {
   const { user } = useAuth()
-  const { messages, isLoading, currentStep, error, sendMessage } = useRAGQuery()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const { messages, isLoading, pipelineEvents, error, sendMessage } = useRAGQuery()
   const scroll = useChatScroll(messages.length)
-  const [chunkCount, setChunkCount] = useState<number | undefined>(undefined)
   const [graphIsEmpty, setGraphIsEmpty] = useState(false)
+
+  // Capture the auto-query from router state once on mount.
+  // We read it into a ref immediately so it survives re-renders.
+  const pendingAutoQuery = useRef(
+    (location.state as { autoQuery?: string } | null)?.autoQuery ?? ''
+  )
 
   useEffect(() => {
     if (!user) return
     getGraphStats(user.id)
       .then(s => {
-        setChunkCount(s.chunkCount)
         setGraphIsEmpty(s.nodeCount === 0)
       })
       .catch(() => {})
   }, [user])
+
+  // Fire the auto-query once user is available, then clear router state.
+  useEffect(() => {
+    const query = pendingAutoQuery.current
+    if (!query || !user) return
+    pendingAutoQuery.current = ''
+    // Replace history entry to prevent re-firing if user navigates back/forward
+    navigate('/ask', { state: {}, replace: true })
+    void sendMessage(query)
+  }, [user, sendMessage, navigate])
 
   const handleSend = (text: string) => {
     void sendMessage(text)
@@ -49,8 +66,7 @@ export function AskView() {
         <ChatMessageList
           messages={messages}
           isLoading={isLoading}
-          currentStep={currentStep}
-          chunkCount={chunkCount}
+          pipelineEvents={pipelineEvents}
           scroll={scroll}
         />
       )}

@@ -545,6 +545,7 @@ export async function fetchCrossConnectionsForSource(
         toLabel: otherNode.label,
         toEntityType: otherNode.entity_type,
         relationType: edge.relation_type ?? 'relates_to',
+        isAnchor: false,
         toSourceId: otherNode.source_id,
         toSourceTitle: null,  // Not fetched here — use feedQueries.ts for enriched version
         toSourceType: null,
@@ -743,13 +744,62 @@ export async function fetchChunksForSources(
   }))
 }
 
-/** @deprecated Kept for compatibility. The RPC-based semantic search is not functional. */
+/** Semantic search over source chunks using vector cosine similarity (match_source_chunks RPC). */
 export async function semanticSearchChunks(
-  _embedding: number[],
-  _userId: string,
-  _options: { matchThreshold?: number; matchCount?: number } = {}
+  embedding: number[],
+  userId: string,
+  options: { matchThreshold?: number; matchCount?: number } = {}
 ): Promise<SemanticChunkResult[]> {
-  return []
+  if (!embedding || embedding.length === 0) return []
+  const { matchThreshold = 0.4, matchCount = 15 } = options
+
+  const { data, error } = await supabase.rpc('match_source_chunks', {
+    query_embedding: embedding,
+    match_threshold: matchThreshold,
+    match_count: matchCount,
+    p_user_id: userId,
+  })
+
+  if (error) {
+    console.warn('[semanticSearchChunks] RPC failed:', error.message)
+    return []
+  }
+
+  return (data ?? []) as SemanticChunkResult[]
+}
+
+// ─── RAG: Semantic Search on Nodes ────────────────────────────────────────────
+
+export interface SemanticNodeResult {
+  id: string
+  label: string
+  entity_type: string
+  description: string | null
+  similarity: number
+}
+
+/** Semantic search over knowledge nodes using vector cosine similarity (match_knowledge_nodes RPC). */
+export async function semanticSearchNodes(
+  embedding: number[],
+  userId: string,
+  options: { matchThreshold?: number; matchCount?: number } = {}
+): Promise<SemanticNodeResult[]> {
+  if (!embedding || embedding.length === 0) return []
+  const { matchThreshold = 0.4, matchCount = 20 } = options
+
+  const { data, error } = await supabase.rpc('match_knowledge_nodes', {
+    query_embedding: embedding,
+    match_threshold: matchThreshold,
+    match_count: matchCount,
+    p_user_id: userId,
+  })
+
+  if (error) {
+    console.warn('[semanticSearchNodes] RPC failed:', error.message)
+    return []
+  }
+
+  return (data ?? []) as SemanticNodeResult[]
 }
 
 // ─── RAG: Keyword Search on Nodes ────────────────────────────────────────────

@@ -9,6 +9,7 @@ interface BriefingsTabProps {
   generatingProfileId?: string | null
   onCreateNew: () => void
   onViewProfile: (profileId: string) => void
+  onEditProfile: (profileId: string) => void
   onGenerateNow: (profileId: string) => void
 }
 
@@ -19,6 +20,7 @@ export function BriefingsTab({
   generatingProfileId,
   onCreateNew,
   onViewProfile,
+  onEditProfile,
   onGenerateNow,
 }: BriefingsTabProps) {
   if (loading) {
@@ -87,6 +89,7 @@ export function BriefingsTab({
           key={profile.id}
           profile={profile}
           onView={() => onViewProfile(profile.id)}
+          onEdit={() => onEditProfile(profile.id)}
           onGenerateNow={() => onGenerateNow(profile.id)}
           generating={generatingProfileId === profile.id}
         />

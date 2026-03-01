@@ -113,3 +113,27 @@ export interface GraphStats {
   edgeCount: number
   sourceCount: number
 }
+
+export interface RAGStepEvent {
+  step: RAGPipelineStep
+  status: 'running' | 'done'
+  // embedding step
+  subQueries?: string[]
+  hasEmbedding?: boolean
+  // semantic_search step
+  sources?: number
+  keywordNodes?: number
+  semanticChunks?: number
+  semanticNodes?: number
+  // keyword_search step (chunk retrieval)
+  rawChunks?: number
+  rankedChunks?: number
+  // graph_traversal step
+  seedNodes?: number
+  graphNodes?: number
+  graphEdges?: number
+  // context_assembly step
+  contextChunks?: number
+  contextNodes?: number
+  relationshipPaths?: number
+}

@@ -1,22 +1,20 @@
 import { ChevronDown } from 'lucide-react'
 import { ChatMessage } from './ChatMessage'
 import { RAGProgressIndicator } from './RAGProgressIndicator'
-import type { ChatMessage as ChatMessageType, RAGPipelineStep } from '../../types/rag'
+import type { ChatMessage as ChatMessageType, RAGStepEvent } from '../../types/rag'
 import type { UseChatScrollReturn } from '../../hooks/useChatScroll'
 
 interface ChatMessageListProps {
   messages: ChatMessageType[]
   isLoading: boolean
-  currentStep: RAGPipelineStep | null
-  chunkCount?: number
+  pipelineEvents: RAGStepEvent[]
   scroll: UseChatScrollReturn
 }
 
 export function ChatMessageList({
   messages,
   isLoading,
-  currentStep,
-  chunkCount,
+  pipelineEvents,
   scroll,
 }: ChatMessageListProps) {
   return (
@@ -34,9 +32,9 @@ export function ChatMessageList({
           <ChatMessage key={message.id} message={message} />
         ))}
 
-        {isLoading && currentStep && (
+        {isLoading && (
           <div className="flex justify-start">
-            <RAGProgressIndicator step={currentStep} chunkCount={chunkCount} />
+            <RAGProgressIndicator events={pipelineEvents} />
           </div>
         )}
 

@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { X, ChevronRight, ChevronLeft, GripVertical, Plus, Trash2 } from 'lucide-react'
+import { X, ChevronRight, ChevronLeft, GripVertical, Plus, Trash2, Bot, Pencil } from 'lucide-react'
 import { DIGEST_TEMPLATES, getTemplatesForFrequency } from '../../config/digestTemplates'
 import { useDigestProfiles } from '../../hooks/useDigestProfiles'
 import type { DigestProfile } from '../../types/feed'
@@ -38,12 +38,14 @@ interface DigestProfileEditorProps {
   profile?: DigestProfile
   onClose: () => void
   onSaved: (id: string) => void
+  /** When true, renders as an inline panel instead of a fixed modal overlay */
+  panel?: boolean
 }
 
 type Frequency = 'daily' | 'weekly' | 'monthly'
 type Density = 'brief' | 'standard' | 'comprehensive'
 
-export function DigestProfileEditor({ profile, onClose, onSaved }: DigestProfileEditorProps) {
+export function DigestProfileEditor({ profile, onClose, onSaved, panel = false }: DigestProfileEditorProps) {
   const { create, update } = useDigestProfiles()
   const isEditing = !!profile
 
@@ -66,11 +68,16 @@ export function DigestProfileEditor({ profile, onClose, onSaved }: DigestProfile
     return profile.modules
       .filter(m => m.isActive)
       .sort((a, b) => a.sortOrder - b.sortOrder)
-      .map(m => ({ templateId: m.templateId, customContext: '', sortOrder: m.sortOrder }))
+      .map(m => ({ templateId: m.templateId, customContext: m.customContext ?? '', sortOrder: m.sortOrder }))
   })
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [expandedContext, setExpandedContext] = useState<string | null>(null)
+
+  // Custom agent form
+  const [showCustomForm, setShowCustomForm] = useState(false)
+  const [editingCustomIndex, setEditingCustomIndex] = useState<number | null>(null)
+  const [customDraft, setCustomDraft] = useState({ name: '', task: '', behavior: '', goal: '', outputFormat: '' })
 
   // Step 3: Channels
   const [emailChannel, setEmailChannel] = useState<ChannelState>({ enabled: false, config: {} })
@@ -81,6 +88,7 @@ export function DigestProfileEditor({ profile, onClose, onSaved }: DigestProfile
   const handleFrequencyChange = useCallback((f: Frequency) => {
     setFrequency(f)
     setSelectedModules(prev => prev.filter(m => {
+      if (m.templateId === 'custom_agent') return true // custom agents are frequency-agnostic
       const t = DIGEST_TEMPLATES.find(t => t.id === m.templateId)
       return t?.frequency === f
     }))
@@ -93,6 +101,50 @@ export function DigestProfileEditor({ profile, onClose, onSaved }: DigestProfile
       return [...prev, { templateId, customContext: '', sortOrder: prev.length }]
     })
   }, [])
+
+  const openCustomFormForNew = useCallback(() => {
+    setCustomDraft({ name: '', task: '', behavior: '', goal: '', outputFormat: '' })
+    setEditingCustomIndex(null)
+    setShowCustomForm(true)
+  }, [])
+
+  const openCustomFormForEdit = useCallback((index: number) => {
+    const mod = selectedModules[index]
+    if (!mod) return
+    try {
+      const cfg = JSON.parse(mod.customContext) as { name?: string; task?: string; behavior?: string; goal?: string; outputFormat?: string }
+      setCustomDraft({
+        name: cfg.name ?? '',
+        task: cfg.task ?? '',
+        behavior: cfg.behavior ?? '',
+        goal: cfg.goal ?? '',
+        outputFormat: cfg.outputFormat ?? '',
+      })
+    } catch {
+      setCustomDraft({ name: '', task: '', behavior: '', goal: '', outputFormat: '' })
+    }
+    setEditingCustomIndex(index)
+    setShowCustomForm(true)
+  }, [selectedModules])
+
+  const handleSaveCustomAgent = useCallback(() => {
+    if (!customDraft.name.trim() || !customDraft.task.trim()) return
+    const customContext = JSON.stringify({
+      name: customDraft.name.trim(),
+      task: customDraft.task.trim(),
+      behavior: customDraft.behavior.trim(),
+      goal: customDraft.goal.trim(),
+      outputFormat: customDraft.outputFormat.trim(),
+    })
+    setSelectedModules(prev => {
+      if (editingCustomIndex !== null) {
+        return prev.map((m, i) => i === editingCustomIndex ? { ...m, customContext } : m)
+      }
+      return [...prev, { templateId: 'custom_agent', customContext, sortOrder: prev.length }]
+    })
+    setShowCustomForm(false)
+    setEditingCustomIndex(null)
+  }, [customDraft, editingCustomIndex])
 
   // Drag-and-drop reordering
   const handleDragStart = (i: number) => setDragIndex(i)
@@ -176,23 +228,16 @@ export function DigestProfileEditor({ profile, onClose, onSaved }: DigestProfile
   const availableTemplates = getTemplatesForFrequency(frequency)
   const selectedTemplateIds = new Set(selectedModules.map(m => m.templateId))
 
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 9500,
-        background: 'rgba(0,0,0,0.55)',
-        backdropFilter: 'blur(4px)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '24px 16px',
-      }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
-    >
+  const innerContent = (
       <div
-        style={{
+        style={panel ? {
+          width: '100%',
+          height: '100%',
+          background: 'var(--color-bg-content)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        } : {
           width: '100%',
           maxWidth: 680,
           maxHeight: 'calc(100vh - 48px)',
@@ -204,7 +249,7 @@ export function DigestProfileEditor({ profile, onClose, onSaved }: DigestProfile
           overflow: 'hidden',
           boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
         }}
-        onClick={e => e.stopPropagation()}
+        onClick={panel ? undefined : e => e.stopPropagation()}
       >
         {/* Header */}
         <div
@@ -461,6 +506,162 @@ export function DigestProfileEditor({ profile, onClose, onSaved }: DigestProfile
                 </div>
               </div>
 
+              {/* Add Custom Agent Module */}
+              {!showCustomForm && (
+                <button
+                  type="button"
+                  onClick={openCustomFormForNew}
+                  className="flex items-center gap-2 cursor-pointer rounded-[8px] w-full text-left"
+                  style={{
+                    padding: '10px 14px',
+                    background: 'var(--color-bg-inset)',
+                    border: '1.5px dashed var(--border-default)',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <Bot size={14} style={{ color: 'var(--color-accent-500)', flexShrink: 0 }} />
+                  <div>
+                    <p className="font-body font-semibold" style={{ fontSize: 12, color: 'var(--color-accent-500)' }}>
+                      Add Custom AI Agent
+                    </p>
+                    <p className="font-body" style={{ fontSize: 10, color: 'var(--color-text-secondary)', lineHeight: 1.4 }}>
+                      Describe a task, and an AI agent will scan your knowledge graph and generate a custom-formatted output
+                    </p>
+                  </div>
+                </button>
+              )}
+
+              {/* Custom agent form */}
+              {showCustomForm && (
+                <div
+                  style={{
+                    background: 'var(--color-bg-inset)',
+                    border: '1px solid var(--color-accent-500)',
+                    borderRadius: 10,
+                    padding: '16px',
+                  }}
+                >
+                  <div className="flex items-center justify-between" style={{ marginBottom: 14 }}>
+                    <div className="flex items-center gap-2">
+                      <Bot size={14} style={{ color: 'var(--color-accent-500)' }} />
+                      <span className="font-body font-semibold" style={{ fontSize: 13, color: 'var(--color-text-primary)' }}>
+                        {editingCustomIndex !== null ? 'Edit Custom Agent' : 'New Custom Agent'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setShowCustomForm(false); setEditingCustomIndex(null) }}
+                      className="flex items-center justify-center rounded cursor-pointer"
+                      style={{ background: 'none', border: 'none', color: 'var(--color-text-secondary)' }}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div>
+                      <label className="font-body font-semibold" style={{ fontSize: 11, color: 'var(--color-text-body)', display: 'block', marginBottom: 4 }}>
+                        Module Name <span style={{ color: '#ef4444' }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={customDraft.name}
+                        onChange={e => setCustomDraft(d => ({ ...d, name: e.target.value }))}
+                        placeholder="e.g. Weekly Action Items"
+                        className="font-body w-full"
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div>
+                      <label className="font-body font-semibold" style={{ fontSize: 11, color: 'var(--color-text-body)', display: 'block', marginBottom: 4 }}>
+                        Task <span style={{ color: '#ef4444' }}>*</span>
+                        <span className="font-body" style={{ fontWeight: 400, marginLeft: 4, color: 'var(--color-text-secondary)' }}>what should the agent search for?</span>
+                      </label>
+                      <textarea
+                        value={customDraft.task}
+                        onChange={e => setCustomDraft(d => ({ ...d, task: e.target.value }))}
+                        placeholder="e.g. Find all open commitments, follow-up items, and unresolved decisions in my knowledge graph from the past week"
+                        className="font-body w-full"
+                        rows={3}
+                        style={{ ...inputStyle, resize: 'none' }}
+                      />
+                    </div>
+                    <div>
+                      <label className="font-body font-semibold" style={{ fontSize: 11, color: 'var(--color-text-body)', display: 'block', marginBottom: 4 }}>
+                        Behaviour
+                        <span className="font-body" style={{ fontWeight: 400, marginLeft: 4, color: 'var(--color-text-secondary)' }}>how should the agent approach the analysis?</span>
+                      </label>
+                      <textarea
+                        value={customDraft.behavior}
+                        onChange={e => setCustomDraft(d => ({ ...d, behavior: e.target.value }))}
+                        placeholder="e.g. Prioritise items with the most connections to my anchor nodes, highlight anything marked urgent or high-priority"
+                        className="font-body w-full"
+                        rows={2}
+                        style={{ ...inputStyle, resize: 'none' }}
+                      />
+                    </div>
+                    <div>
+                      <label className="font-body font-semibold" style={{ fontSize: 11, color: 'var(--color-text-body)', display: 'block', marginBottom: 4 }}>
+                        Goal
+                        <span className="font-body" style={{ fontWeight: 400, marginLeft: 4, color: 'var(--color-text-secondary)' }}>what should the output accomplish?</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={customDraft.goal}
+                        onChange={e => setCustomDraft(d => ({ ...d, goal: e.target.value }))}
+                        placeholder="e.g. Help me start each day knowing exactly what needs my attention"
+                        className="font-body w-full"
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div>
+                      <label className="font-body font-semibold" style={{ fontSize: 11, color: 'var(--color-text-body)', display: 'block', marginBottom: 4 }}>
+                        Output Format
+                        <span className="font-body" style={{ fontWeight: 400, marginLeft: 4, color: 'var(--color-text-secondary)' }}>how should the content be presented in the digest?</span>
+                      </label>
+                      <textarea
+                        value={customDraft.outputFormat}
+                        onChange={e => setCustomDraft(d => ({ ...d, outputFormat: e.target.value }))}
+                        placeholder="e.g. A numbered list of action items, each starting with a verb. Keep each item under 15 words. Group by project if there are more than 5 items."
+                        className="font-body w-full"
+                        rows={3}
+                        style={{ ...inputStyle, resize: 'none' }}
+                      />
+                    </div>
+                    {(!customDraft.name.trim() || !customDraft.task.trim()) && (
+                      <p className="font-body" style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>
+                        Module Name and Task are required.
+                      </p>
+                    )}
+                    <div className="flex justify-end gap-2" style={{ marginTop: 4 }}>
+                      <button
+                        type="button"
+                        onClick={() => { setShowCustomForm(false); setEditingCustomIndex(null) }}
+                        className="font-body font-semibold cursor-pointer rounded-md"
+                        style={{ fontSize: 12, padding: '6px 12px', background: 'var(--color-bg-card)', border: '1px solid var(--border-default)', color: 'var(--color-text-body)' }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSaveCustomAgent}
+                        disabled={!customDraft.name.trim() || !customDraft.task.trim()}
+                        className="font-body font-semibold cursor-pointer rounded-md"
+                        style={{
+                          fontSize: 12,
+                          padding: '6px 12px',
+                          background: (!customDraft.name.trim() || !customDraft.task.trim()) ? 'var(--color-bg-card)' : 'var(--color-accent-500)',
+                          border: 'none',
+                          color: (!customDraft.name.trim() || !customDraft.task.trim()) ? 'var(--color-text-secondary)' : '#fff',
+                          cursor: (!customDraft.name.trim() || !customDraft.task.trim()) ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {editingCustomIndex !== null ? 'Save Changes' : 'Add to Digest'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Selected modules — reorderable */}
               {selectedModules.length > 0 && (
                 <div>
@@ -472,11 +673,18 @@ export function DigestProfileEditor({ profile, onClose, onSaved }: DigestProfile
                   </p>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {selectedModules.map((mod, i) => {
-                      const template = DIGEST_TEMPLATES.find(t => t.id === mod.templateId)
-                      const isExpanded = expandedContext === mod.templateId
+                      const isCustom = mod.templateId === 'custom_agent'
+                      const template = isCustom ? null : DIGEST_TEMPLATES.find(t => t.id === mod.templateId)
+                      let displayName = template?.name ?? mod.templateId
+                      if (isCustom) {
+                        try { displayName = (JSON.parse(mod.customContext) as { name?: string }).name ?? 'Custom Agent' }
+                        catch { displayName = 'Custom Agent' }
+                      }
+                      const isExpanded = !isCustom && expandedContext === mod.templateId
+                      const uniqueKey = isCustom ? `custom_agent_${i}` : mod.templateId
                       return (
                         <div
-                          key={mod.templateId}
+                          key={uniqueKey}
                           draggable
                           onDragStart={() => handleDragStart(i)}
                           onDragOver={e => handleDragOver(e, i)}
@@ -484,7 +692,7 @@ export function DigestProfileEditor({ profile, onClose, onSaved }: DigestProfile
                           onDragEnd={handleDragEnd}
                           style={{
                             background: 'var(--color-bg-card)',
-                            border: `1px solid ${dragOverIndex === i ? 'var(--color-accent-500)' : 'var(--border-subtle)'}`,
+                            border: `1px solid ${dragOverIndex === i ? 'var(--color-accent-500)' : isCustom ? 'rgba(214,58,0,0.25)' : 'var(--border-subtle)'}`,
                             borderRadius: 8,
                             padding: '10px 12px',
                             cursor: 'grab',
@@ -492,20 +700,32 @@ export function DigestProfileEditor({ profile, onClose, onSaved }: DigestProfile
                         >
                           <div className="flex items-center gap-2">
                             <GripVertical size={14} style={{ color: 'var(--color-text-placeholder)', flexShrink: 0 }} />
-                            <span className="font-body font-semibold flex-1" style={{ fontSize: 12, color: 'var(--color-text-primary)' }}>
-                              {template?.name ?? mod.templateId}
+                            {isCustom && <Bot size={12} style={{ color: 'var(--color-accent-500)', flexShrink: 0 }} />}
+                            <span className="font-body font-semibold flex-1" style={{ fontSize: 12, color: isCustom ? 'var(--color-accent-500)' : 'var(--color-text-primary)' }}>
+                              {displayName}
                             </span>
+                            {isCustom ? (
+                              <button
+                                type="button"
+                                onClick={() => openCustomFormForEdit(i)}
+                                className="flex items-center gap-1 cursor-pointer font-body"
+                                style={{ fontSize: 10, color: 'var(--color-text-secondary)', background: 'none', border: 'none', padding: '0 4px' }}
+                              >
+                                <Pencil size={10} /> Edit
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setExpandedContext(isExpanded ? null : mod.templateId)}
+                                className="cursor-pointer font-body"
+                                style={{ fontSize: 10, color: 'var(--color-text-secondary)', background: 'none', border: 'none', padding: '0 4px' }}
+                              >
+                                {isExpanded ? 'Hide context' : 'Add context'}
+                              </button>
+                            )}
                             <button
                               type="button"
-                              onClick={() => setExpandedContext(isExpanded ? null : mod.templateId)}
-                              className="cursor-pointer font-body"
-                              style={{ fontSize: 10, color: 'var(--color-text-secondary)', background: 'none', border: 'none', padding: '0 4px' }}
-                            >
-                              {isExpanded ? 'Hide context' : 'Add context'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => toggleTemplate(mod.templateId)}
+                              onClick={() => setSelectedModules(prev => prev.filter((_, idx) => idx !== i).map((m, idx) => ({ ...m, sortOrder: idx })))}
                               className="flex items-center justify-center cursor-pointer rounded"
                               style={{
                                 width: 22,
@@ -522,8 +742,8 @@ export function DigestProfileEditor({ profile, onClose, onSaved }: DigestProfile
                           {isExpanded && (
                             <textarea
                               value={mod.customContext}
-                              onChange={e => setSelectedModules(prev => prev.map(m =>
-                                m.templateId === mod.templateId ? { ...m, customContext: e.target.value } : m
+                              onChange={e => setSelectedModules(prev => prev.map((m, idx) =>
+                                idx === i ? { ...m, customContext: e.target.value } : m
                               ))}
                               placeholder={template?.defaultContext ?? 'Add optional context for this module…'}
                               className="font-body w-full"
@@ -549,13 +769,13 @@ export function DigestProfileEditor({ profile, onClose, onSaved }: DigestProfile
                 </div>
               )}
 
-              {selectedModules.length === 0 && (
+              {selectedModules.length === 0 && !showCustomForm && (
                 <div
                   className="flex flex-col items-center justify-center"
                   style={{ paddingTop: 24, paddingBottom: 24, color: 'var(--color-text-secondary)' }}
                 >
                   <Plus size={20} style={{ marginBottom: 8 }} />
-                  <p className="font-body" style={{ fontSize: 13 }}>Select at least one template above</p>
+                  <p className="font-body" style={{ fontSize: 13 }}>Select a template above or add a custom agent</p>
                 </div>
               )}
             </div>
@@ -700,6 +920,26 @@ export function DigestProfileEditor({ profile, onClose, onSaved }: DigestProfile
           )}
         </div>
       </div>
+  )
+
+  if (panel) return innerContent
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9500,
+        background: 'rgba(0,0,0,0.55)',
+        backdropFilter: 'blur(4px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '24px 16px',
+      }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    >
+      {innerContent}
     </div>
   )
 }

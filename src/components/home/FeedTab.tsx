@@ -10,9 +10,11 @@ interface FeedTabProps {
   hasMore: boolean
   onLoadMore: () => void
   onRetry: () => void
+  selectedSourceId: string | null
+  onItemSelect: (item: FeedItem) => void
 }
 
-export function FeedTab({ items, loading, error, hasMore, onLoadMore, onRetry }: FeedTabProps) {
+export function FeedTab({ items, loading, error, hasMore, onLoadMore, onRetry, selectedSourceId, onItemSelect }: FeedTabProps) {
   const navigate = useNavigate()
 
   if (loading && items.length === 0) {
@@ -112,6 +114,8 @@ export function FeedTab({ items, loading, error, hasMore, onLoadMore, onRetry }:
           key={item.source.id}
           item={item}
           animDelay={idx < 7 ? idx * 0.05 : 0}
+          isSelected={item.source.id === selectedSourceId}
+          onItemSelect={onItemSelect}
         />
       ))}
 

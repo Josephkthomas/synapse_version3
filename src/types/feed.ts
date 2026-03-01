@@ -22,6 +22,7 @@ export interface WithinSourceConnection {
   toLabel: string
   toEntityType: string
   relationType: string
+  isAnchor: boolean
 }
 
 export interface CrossConnection {
@@ -33,6 +34,7 @@ export interface CrossConnection {
   toLabel: string
   toEntityType: string
   relationType: string
+  isAnchor: boolean
   toSourceId: string | null
   toSourceTitle: string | null
   toSourceType: string | null
@@ -53,6 +55,7 @@ export interface DigestModule {
   templateId: string
   sortOrder: number
   isActive: boolean
+  customContext?: string
 }
 
 export interface DigestProfile {

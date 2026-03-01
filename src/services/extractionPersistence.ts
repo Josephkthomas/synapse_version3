@@ -166,7 +166,7 @@ export async function updateNodeEmbeddings(
       nodes.slice(i, i + batchSize).map(n =>
         supabase
           .from('knowledge_nodes')
-          .update({ embedding: JSON.stringify(n.embedding) })
+          .update({ embedding: n.embedding })
           .eq('id', n.id)
       )
     )
@@ -189,7 +189,7 @@ export async function saveChunks(
       content,
     }
     if (embeddings[i]) {
-      row.embedding = JSON.stringify(embeddings[i])
+      row.embedding = embeddings[i]
     }
     return row
   })

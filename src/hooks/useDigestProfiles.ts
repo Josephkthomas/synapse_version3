@@ -30,6 +30,7 @@ function mapRawProfile(p: any): DigestProfile {
           templateId: m.template_id ?? m.templateId ?? '',
           sortOrder: m.sort_order ?? m.sortOrder ?? 0,
           isActive: m.is_active ?? m.isActive ?? true,
+          customContext: m.custom_context ?? undefined,
         }))
       : [],
     status: 'scheduled' as const,
@@ -82,7 +83,7 @@ export function useDigestProfiles(): UseDigestProfilesReturn {
         .from('digest_profiles')
         .select(`
           id, title, frequency, is_active, schedule_time, schedule_timezone, density, created_at,
-          digest_modules ( id, template_id, sort_order, is_active )
+          digest_modules ( id, template_id, sort_order, is_active, custom_context )
         `)
         .order('created_at', { ascending: false })
 

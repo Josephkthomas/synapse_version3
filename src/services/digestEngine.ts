@@ -40,6 +40,55 @@ export async function generateDigest(
   for (let i = 0; i < activeModules.length; i++) {
     const mod = activeModules[i]
     if (!mod) continue
+
+    // ── Custom agent module ──────────────────────────────────────────────────
+    if (mod.templateId === 'custom_agent') {
+      let customConfig: { name?: string; task?: string; behavior?: string; goal?: string; outputFormat?: string } = {}
+      try { customConfig = JSON.parse(mod.customContext ?? '{}') } catch { continue }
+      if (!customConfig.task?.trim()) continue
+
+      const moduleName = customConfig.name?.trim() || 'Custom Agent'
+      options?.onModuleProgress?.(i + 1, activeModules.length, moduleName)
+      const moduleStart = Date.now()
+
+      try {
+        let query = customConfig.task
+        if (customConfig.behavior?.trim()) query += `\n\nApproach: ${customConfig.behavior}`
+        if (customConfig.goal?.trim()) query += `\n\nGoal: ${customConfig.goal}`
+        if (customConfig.outputFormat?.trim()) {
+          query += `\n\nFormat your response exactly as follows: ${customConfig.outputFormat}. Preserve this format precisely — do not wrap it in standard module headings or additional structure.`
+        }
+        const densityInstruction = DENSITY_INSTRUCTIONS[density] ?? DENSITY_INSTRUCTIONS.standard
+        query += `\n\n${densityInstruction}`
+        if (recentThemes) {
+          query += `\n\nRecent digest themes (avoid repetition, focus on new developments): ${recentThemes}`
+        }
+
+        const result = await queryGraph(query, userId, [])
+        moduleOutputs.push({
+          templateId: mod.templateId,
+          templateName: moduleName,
+          content: result.answer,
+          citations: result.citations,
+          relatedNodes: result.relatedNodes,
+          generationDurationMs: Date.now() - moduleStart,
+        })
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Unknown error'
+        moduleOutputs.push({
+          templateId: mod.templateId,
+          templateName: moduleName,
+          content: 'This module encountered an error during generation.',
+          citations: [],
+          relatedNodes: [],
+          generationDurationMs: Date.now() - moduleStart,
+          error: message,
+        })
+      }
+      continue
+    }
+
+    // ── Standard template module ─────────────────────────────────────────────
     const template = getTemplateById(mod.templateId)
     if (!template) continue
 

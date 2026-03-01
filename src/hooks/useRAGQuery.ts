@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from 'react'
 import { useAuth } from './useAuth'
 import { useGraphContext } from './useGraphContext'
 import { queryGraph, buildRAGResponseContext } from '../services/rag'
-import type { ChatMessage, RAGPipelineStep, RAGResponseContext } from '../types/rag'
+import type { ChatMessage, RAGPipelineStep, RAGResponseContext, RAGStepEvent } from '../types/rag'
 
 function generateId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36)
@@ -12,6 +12,7 @@ export interface UseRAGQueryReturn {
   messages: ChatMessage[]
   isLoading: boolean
   currentStep: RAGPipelineStep | null
+  pipelineEvents: RAGStepEvent[]
   error: string | null
   lastResponseContext: RAGResponseContext | null
   sendMessage: (text: string) => Promise<void>
@@ -24,6 +25,7 @@ export function useRAGQuery(): UseRAGQueryReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [currentStep, setCurrentStep] = useState<RAGPipelineStep | null>(null)
+  const [pipelineEvents, setPipelineEvents] = useState<RAGStepEvent[]>([])
   const [error, setError] = useState<string | null>(null)
   const [lastResponseContext, setLastResponseContext] = useState<RAGResponseContext | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -56,6 +58,7 @@ export function useRAGQuery(): UseRAGQueryReturn {
     setMessages(prev => [...prev, userMessage])
     setIsLoading(true)
     setCurrentStep(null)
+    setPipelineEvents([])
     setError(null)
 
     const startTime = Date.now()
@@ -71,9 +74,18 @@ export function useRAGQuery(): UseRAGQueryReturn {
         text,
         user.id,
         conversationHistory,
-        (step) => {
+        (event) => {
           if (!controller.signal.aborted) {
-            setCurrentStep(step)
+            if (event.status === 'running') setCurrentStep(event.step)
+            setPipelineEvents(prev => {
+              const idx = prev.findIndex(e => e.step === event.step)
+              if (idx >= 0) {
+                const updated = [...prev]
+                updated[idx] = event
+                return updated
+              }
+              return [...prev, event]
+            })
           }
         },
         controller.signal
@@ -139,6 +151,7 @@ export function useRAGQuery(): UseRAGQueryReturn {
     messages,
     isLoading,
     currentStep,
+    pipelineEvents,
     error,
     lastResponseContext,
     sendMessage,

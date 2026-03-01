@@ -8,6 +8,7 @@ type PartialNode = {
   label: string
   entity_type: string
   confidence: number | null
+  is_anchor: boolean | null
 }
 
 type PartialEdge = {
@@ -22,6 +23,7 @@ type OtherNode = {
   label: string
   entity_type: string
   source_id: string | null
+  is_anchor: boolean | null
 }
 
 type SourceMeta = {
@@ -77,7 +79,7 @@ export async function fetchActivityFeed(
   // Step 2: Batch fetch all nodes for these sources
   const { data: rawNodes } = await supabase
     .from('knowledge_nodes')
-    .select('id, source_id, label, entity_type, confidence')
+    .select('id, source_id, label, entity_type, confidence, is_anchor')
     .in('source_id', sourceIds)
     .order('confidence', { ascending: false, nullsFirst: false })
 
@@ -141,7 +143,7 @@ export async function fetchActivityFeed(
   if (otherNodeIdSet.size > 0) {
     const { data: otherNodes } = await supabase
       .from('knowledge_nodes')
-      .select('id, label, entity_type, source_id')
+      .select('id, label, entity_type, source_id, is_anchor')
       .in('id', Array.from(otherNodeIdSet))
     ;(otherNodes as OtherNode[] | null)?.forEach(n => otherNodeMap.set(n.id, n))
   }
@@ -207,6 +209,7 @@ export async function fetchActivityFeed(
               toLabel: toNode.label,
               toEntityType: toNode.entity_type,
               relationType: edge.relation_type ?? 'relates_to',
+              isAnchor: toNode.is_anchor === true,
             })
           }
         }
@@ -227,6 +230,7 @@ export async function fetchActivityFeed(
               toLabel: otherNode.label,
               toEntityType: otherNode.entity_type,
               relationType: edge.relation_type ?? 'relates_to',
+              isAnchor: otherNode.is_anchor === true,
               toSourceId: otherNode.source_id,
               toSourceTitle: otherSrc?.title ?? null,
               toSourceType: otherSrc?.source_type ?? null,
@@ -250,6 +254,7 @@ export async function fetchActivityFeed(
               toLabel: toNode.label,
               toEntityType: toNode.entity_type,
               relationType: edge.relation_type ?? 'relates_to',
+              isAnchor: otherNode.is_anchor === true,
               toSourceId: otherNode.source_id,
               toSourceTitle: otherSrc?.title ?? null,
               toSourceType: otherSrc?.source_type ?? null,

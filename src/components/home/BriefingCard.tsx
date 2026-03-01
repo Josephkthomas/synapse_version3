@@ -1,4 +1,4 @@
-import { Bot, Eye, Zap } from 'lucide-react'
+import { Bot, Eye, Pencil, Zap } from 'lucide-react'
 import { getTemplateById } from '../../config/digestTemplates'
 import type { DigestProfile } from '../../types/feed'
 
@@ -24,11 +24,12 @@ function formatScheduleLabel(time: string, frequency: string): string {
 interface BriefingCardProps {
   profile: DigestProfile
   onView?: () => void
+  onEdit?: () => void
   onGenerateNow?: () => void
   generating?: boolean
 }
 
-export function BriefingCard({ profile, onView, onGenerateNow, generating }: BriefingCardProps) {
+export function BriefingCard({ profile, onView, onEdit, onGenerateNow, generating }: BriefingCardProps) {
   const isReady = profile.status === 'ready'
   const activeModules = profile.modules
     .filter(m => m.isActive)
@@ -95,20 +96,27 @@ export function BriefingCard({ profile, onView, onGenerateNow, generating }: Bri
       {activeModules.length > 0 && (
         <div className="flex flex-wrap gap-1" style={{ marginBottom: 10 }}>
           {activeModules.map(m => {
-            const template = getTemplateById(m.templateId)
+            let label: string
+            if (m.templateId === 'custom_agent') {
+              try { label = (JSON.parse(m.customContext ?? '{}') as { name?: string }).name ?? 'Custom Agent' }
+              catch { label = 'Custom Agent' }
+            } else {
+              label = getTemplateById(m.templateId)?.name ?? m.templateId
+            }
             return (
               <span
                 key={m.id}
                 className="font-body"
                 style={{
                   fontSize: 10,
-                  color: 'var(--color-text-secondary)',
-                  background: 'var(--color-bg-inset)',
+                  color: m.templateId === 'custom_agent' ? 'var(--color-accent-500)' : 'var(--color-text-secondary)',
+                  background: m.templateId === 'custom_agent' ? 'var(--color-accent-50)' : 'var(--color-bg-inset)',
                   padding: '2px 7px',
                   borderRadius: 4,
+                  border: m.templateId === 'custom_agent' ? '1px solid rgba(214,58,0,0.2)' : 'none',
                 }}
               >
-                {template?.name ?? m.templateId}
+                {label}
               </span>
             )
           })}
@@ -118,6 +126,22 @@ export function BriefingCard({ profile, onView, onGenerateNow, generating }: Bri
       {/* Action buttons */}
       <div className="flex items-center gap-2">
         <div className="flex-1" />
+        {onEdit && (
+          <button
+            type="button"
+            onClick={onEdit}
+            className="flex items-center gap-1.5 font-body font-semibold cursor-pointer rounded-md"
+            style={{
+              fontSize: 11,
+              padding: '5px 10px',
+              background: 'var(--color-bg-inset)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--color-text-body)',
+            }}
+          >
+            <Pencil size={11} /> Edit
+          </button>
+        )}
         {isReady && onView && (
           <button
             type="button"

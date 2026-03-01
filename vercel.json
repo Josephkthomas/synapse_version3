@@ -1,5 +1,19 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
+  "crons": [
+    {
+      "path": "/api/youtube/poll",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/youtube/poll-playlist",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/youtube/process",
+      "schedule": "*/5 * * * *"
+    }
   ]
 }
