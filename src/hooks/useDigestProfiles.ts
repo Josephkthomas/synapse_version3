@@ -1,6 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../services/supabase'
+import {
+  createDigestProfile as createProfileService,
+  updateDigestProfile as updateProfileService,
+  deleteDigestProfile as deleteProfileService,
+} from '../services/supabase'
 import type { DigestProfile } from '../types/feed'
+import type { DigestModuleInput, DigestChannelInput } from '../types/digest'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapRawProfile(p: any): DigestProfile {
@@ -26,25 +32,52 @@ function mapRawProfile(p: any): DigestProfile {
           isActive: m.is_active ?? m.isActive ?? true,
         }))
       : [],
-    // All active profiles shown as 'scheduled' until PRD 13 builds generation engine
     status: 'scheduled' as const,
   }
 }
 
-export function useDigestProfiles(): {
+interface UseDigestProfilesReturn {
   profiles: DigestProfile[]
   loading: boolean
   error: Error | null
   tableExists: boolean
-} {
+  refresh: () => void
+  create: (
+    title: string,
+    frequency: 'daily' | 'weekly' | 'monthly',
+    density: 'brief' | 'standard' | 'comprehensive',
+    scheduleTime: string,
+    scheduleTimezone: string,
+    modules: DigestModuleInput[],
+    channels: DigestChannelInput[]
+  ) => Promise<string>
+  update: (
+    id: string,
+    title: string,
+    frequency: 'daily' | 'weekly' | 'monthly',
+    density: 'brief' | 'standard' | 'comprehensive',
+    scheduleTime: string,
+    scheduleTimezone: string,
+    modules: DigestModuleInput[],
+    channels: DigestChannelInput[]
+  ) => Promise<void>
+  remove: (id: string) => Promise<void>
+}
+
+export function useDigestProfiles(): UseDigestProfilesReturn {
   const [profiles, setProfiles] = useState<DigestProfile[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
   const [tableExists, setTableExists] = useState(true)
+  const [tick, setTick] = useState(0)
+
+  const refresh = useCallback(() => setTick(t => t + 1), [])
 
   useEffect(() => {
     async function fetchProfiles() {
-      // Attempt 1: full query with digest_modules join and all columns
+      setLoading(true)
+
+      // Attempt 1: full query with digest_modules join
       const { data, error: fullError } = await supabase
         .from('digest_profiles')
         .select(`
@@ -59,15 +92,14 @@ export function useDigestProfiles(): {
         return
       }
 
-      // Table truly does not exist → show empty state, no error shown to user
+      // Table truly does not exist
       if (fullError.code === '42P01') {
         setTableExists(false)
         setLoading(false)
         return
       }
 
-      // Attempt 2: some column or the digest_modules relation may not exist yet.
-      // Fall back to select('*') on the base table only.
+      // Attempt 2: base table only
       const { data: fallbackData, error: fallbackError } = await supabase
         .from('digest_profiles')
         .select('*')
@@ -79,7 +111,6 @@ export function useDigestProfiles(): {
         return
       }
 
-      // Table really doesn't exist (caught by fallback)
       if (
         fallbackError.code === '42P01' ||
         fallbackError.message?.includes('does not exist')
@@ -89,13 +120,54 @@ export function useDigestProfiles(): {
         return
       }
 
-      // Genuine error
       setError(new Error(fallbackError.message))
       setLoading(false)
     }
 
     fetchProfiles()
-  }, [])
+  }, [tick])
 
-  return { profiles, loading, error, tableExists }
+  const create = useCallback(async (
+    title: string,
+    frequency: 'daily' | 'weekly' | 'monthly',
+    density: 'brief' | 'standard' | 'comprehensive',
+    scheduleTime: string,
+    scheduleTimezone: string,
+    modules: DigestModuleInput[],
+    channels: DigestChannelInput[]
+  ): Promise<string> => {
+    const id = await createProfileService(
+      { title, frequency, density, schedule_time: scheduleTime, schedule_timezone: scheduleTimezone },
+      modules,
+      channels
+    )
+    refresh()
+    return id
+  }, [refresh])
+
+  const update = useCallback(async (
+    id: string,
+    title: string,
+    frequency: 'daily' | 'weekly' | 'monthly',
+    density: 'brief' | 'standard' | 'comprehensive',
+    scheduleTime: string,
+    scheduleTimezone: string,
+    modules: DigestModuleInput[],
+    channels: DigestChannelInput[]
+  ): Promise<void> => {
+    await updateProfileService(
+      id,
+      { title, frequency, density, schedule_time: scheduleTime, schedule_timezone: scheduleTimezone },
+      modules,
+      channels
+    )
+    refresh()
+  }, [refresh])
+
+  const remove = useCallback(async (id: string): Promise<void> => {
+    await deleteProfileService(id)
+    refresh()
+  }, [refresh])
+
+  return { profiles, loading, error, tableExists, refresh, create, update, remove }
 }

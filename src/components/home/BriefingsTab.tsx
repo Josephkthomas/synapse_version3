@@ -6,14 +6,21 @@ interface BriefingsTabProps {
   profiles: DigestProfile[]
   loading: boolean
   tableExists: boolean
+  generatingProfileId?: string | null
+  onCreateNew: () => void
+  onViewProfile: (profileId: string) => void
+  onGenerateNow: (profileId: string) => void
 }
 
-export function BriefingsTab({ profiles, loading, tableExists }: BriefingsTabProps) {
-  // Placeholder: Digests tab in Settings is built in PRD 13
-  const handleConfigureClick = () => {
-    console.info('Configure Digests: available after PRD 13 is implemented')
-  }
-
+export function BriefingsTab({
+  profiles,
+  loading,
+  tableExists,
+  generatingProfileId,
+  onCreateNew,
+  onViewProfile,
+  onGenerateNow,
+}: BriefingsTabProps) {
   if (loading) {
     return (
       <div className="flex flex-col gap-2">
@@ -56,18 +63,18 @@ export function BriefingsTab({ profiles, loading, tableExists }: BriefingsTabPro
         </p>
         <button
           type="button"
-          onClick={handleConfigureClick}
+          onClick={onCreateNew}
           className="font-body font-semibold cursor-pointer rounded-md"
           style={{
             fontSize: 12,
             padding: '7px 14px',
-            background: 'var(--color-bg-inset)',
-            border: '1px solid var(--border-default)',
-            color: 'var(--color-text-body)',
+            background: 'var(--color-accent-500)',
+            border: 'none',
+            color: '#fff',
             marginTop: 16,
           }}
         >
-          Configure
+          Configure First Digest
         </button>
       </div>
     )
@@ -76,13 +83,19 @@ export function BriefingsTab({ profiles, loading, tableExists }: BriefingsTabPro
   return (
     <div>
       {profiles.map(profile => (
-        <BriefingCard key={profile.id} profile={profile} />
+        <BriefingCard
+          key={profile.id}
+          profile={profile}
+          onView={() => onViewProfile(profile.id)}
+          onGenerateNow={() => onGenerateNow(profile.id)}
+          generating={generatingProfileId === profile.id}
+        />
       ))}
 
       {/* Configure New Digest */}
       <button
         type="button"
-        onClick={handleConfigureClick}
+        onClick={onCreateNew}
         className="w-full cursor-pointer flex flex-col items-center justify-center rounded-[12px]"
         style={{
           border: '2px dashed var(--border-default)',

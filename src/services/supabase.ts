@@ -5,6 +5,7 @@ import type { CrossConnection } from '../types/feed'
 import type { ExtractionSession } from '../types/extraction'
 import type { YouTubePlaylist, QueueStats, PlaylistSettings } from '../types/youtube'
 import type { QueueItem, QueueStatusFilter, ScanHistoryEntry, YouTubeChannel, YouTubeSettings, AutomationSummary } from '../types/automate'
+import type { DigestHistoryEntry, DigestModuleInput, DigestChannelInput } from '../types/digest'
 import { generateSynapseCode } from './youtube'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
@@ -633,6 +634,40 @@ export async function getGraphStats(userId: string): Promise<{
   }
 }
 
+// ─── RAG: Term Extraction ─────────────────────────────────────────────────────
+
+// Common English filler words that are useless for search
+const RAG_STOPWORDS = new Set([
+  'what', 'can', 'you', 'the', 'are', 'how', 'tell', 'about', 'that', 'this',
+  'with', 'have', 'from', 'they', 'will', 'been', 'were', 'there', 'which',
+  'when', 'your', 'its', 'our', 'and', 'but', 'for', 'not', 'more', 'some',
+  'all', 'any', 'was', 'has', 'had', 'may', 'who', 'why', 'did', 'does',
+  'give', 'get', 'got', 'let', 'put', 'set', 'see', 'say', 'said', 'know',
+  'just', 'into', 'than', 'then', 'too', 'also', 'very', 'here', 'over',
+  'only', 'use', 'used', 'could', 'would', 'should', 'like', 'want', 'need',
+  'help', 'make', 'made', 'show', 'take', 'think', 'look', 'find', 'time',
+  'please', 'give', 'tell', 'me', 'us', 'its',
+])
+
+/**
+ * Extract the most meaningful search terms from a natural-language query.
+ * - Strips stopwords ("what", "can", "you", "the"…)
+ * - Allows short acronyms ("AI", "ML" = 2 chars)
+ * - Sorts by length descending so specific long words ("upskilling") come first
+ */
+function extractKeyTerms(query: string, limit: number): string[] {
+  const terms = query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .map(w => w.replace(/[^a-z0-9]/g, ''))
+    .filter(w => w.length >= 2 && !RAG_STOPWORDS.has(w))
+    .sort((a, b) => b.length - a.length) // longer words = more specific
+    .slice(0, limit)
+
+  return terms.length > 0 ? terms : [query.trim().toLowerCase()]
+}
+
 // ─── RAG: Chunk Search ────────────────────────────────────────────────────────
 
 export interface SemanticChunkResult {
@@ -652,14 +687,8 @@ export async function keywordSearchChunks(
   const { limit = 12 } = options
   if (!query.trim()) return []
 
-  const terms = query
-    .trim()
-    .split(/\s+/)
-    .map(w => w.replace(/[^a-zA-Z0-9]/g, ''))
-    .filter(w => w.length >= 3)
-    .slice(0, 5)
-  const searchTerms = terms.length > 0 ? terms : [query.trim()]
-  const orFilter = searchTerms.map(term => `content.ilike.%${term}%`).join(',')
+  const terms = extractKeyTerms(query, 6)
+  const orFilter = terms.map(term => `content.ilike.%${term}%`).join(',')
 
   const { data, error } = await supabase
     .from('source_chunks')
@@ -683,7 +712,38 @@ export async function keywordSearchChunks(
   }))
 }
 
-/** @deprecated Use keywordSearchChunks instead. Kept for potential future use. */
+/** Fetch chunks for specific source IDs (source-first retrieval) */
+export async function fetchChunksForSources(
+  sourceIds: string[],
+  _userId: string,
+  options: { limit?: number } = {}
+): Promise<SemanticChunkResult[]> {
+  if (sourceIds.length === 0) return []
+  const { limit = 15 } = options
+
+  const { data, error } = await supabase
+    .from('source_chunks')
+    .select('id, source_id, chunk_index, content')
+    .in('source_id', sourceIds)
+    .order('chunk_index', { ascending: true })
+    .limit(limit)
+
+  if (error) {
+    console.warn('[supabase] fetchChunksForSources failed:', error.message)
+    return []
+  }
+
+  type RawChunk = { id: string; source_id: string; chunk_index: number; content: string }
+  return (data ?? []).map((chunk: RawChunk) => ({
+    id: chunk.id,
+    source_id: chunk.source_id,
+    chunk_index: chunk.chunk_index,
+    content: chunk.content,
+    similarity: 1.0,
+  }))
+}
+
+/** @deprecated Kept for compatibility. The RPC-based semantic search is not functional. */
 export async function semanticSearchChunks(
   _embedding: number[],
   _userId: string,
@@ -716,16 +776,8 @@ export async function keywordSearchNodes(
   const { limit = 10 } = options
   if (!query.trim()) return []
 
-  // Split query into individual terms so "AI upskilling workshop" finds nodes
-  // matching any of: "AI", "upskilling", "workshop" — not the full phrase
-  const terms = query
-    .trim()
-    .split(/\s+/)
-    .map(w => w.replace(/[^a-zA-Z0-9]/g, ''))
-    .filter(w => w.length >= 3)
-    .slice(0, 6)
-  const searchTerms = terms.length > 0 ? terms : [query.trim()]
-  const orFilter = searchTerms
+  const terms = extractKeyTerms(query, 6)
+  const orFilter = terms
     .flatMap(term => [`label.ilike.%${term}%`, `description.ilike.%${term}%`])
     .join(',')
 
@@ -734,6 +786,7 @@ export async function keywordSearchNodes(
     .select('id, label, entity_type, description, source, source_type, source_id, confidence, is_anchor, tags, created_at')
     .eq('user_id', userId)
     .or(orFilter)
+    .order('is_anchor', { ascending: false })
     .order('created_at', { ascending: false })
     .limit(limit)
 
@@ -762,22 +815,15 @@ export async function keywordSearchSources(
   const { limit = 5 } = options
   if (!query.trim()) return []
 
-  const terms = query
-    .trim()
-    .split(/\s+/)
-    .map(w => w.replace(/[^a-zA-Z0-9]/g, ''))
-    .filter(w => w.length >= 3)
-    .slice(0, 6)
-  const searchTerms = terms.length > 0 ? terms : [query.trim()]
-  // Only search title — content column may be absent or very large
-  const orFilter = searchTerms.map(term => `title.ilike.%${term}%`).join(',')
+  const terms = extractKeyTerms(query, 6)
+  const orFilter = terms.map(term => `title.ilike.%${term}%`).join(',')
 
   const { data, error } = await supabase
     .from('knowledge_sources')
     .select('id, title, source_type, source_url, created_at')
     .eq('user_id', userId)
     .or(orFilter)
-    .order('created_at', { ascending: false })
+    .order('created_at', { ascending: false }) // most recent first — handles "latest" queries
     .limit(limit)
 
   if (error) {
@@ -1391,4 +1437,150 @@ export async function getAutomationSummary(userId: string): Promise<AutomationSu
       lastCompletedAt: lastCompletedAt,
     },
   }
+}
+
+// ─── Digest History ────────────────────────────────────────────────────────────
+
+export async function fetchDigestHistory(
+  profileId: string,
+  limit = 5
+): Promise<DigestHistoryEntry[]> {
+  const { data, error } = await supabase
+    .from('digest_history')
+    .select('*')
+    .eq('digest_profile_id', profileId)
+    .order('generated_at', { ascending: false })
+    .limit(limit)
+
+  if (error) {
+    console.warn('fetchDigestHistory error:', error)
+    return []
+  }
+  return (data ?? []) as DigestHistoryEntry[]
+}
+
+export async function saveDigestHistory(
+  entry: Omit<DigestHistoryEntry, 'id' | 'created_at'>
+): Promise<void> {
+  const { error } = await supabase.from('digest_history').insert(entry)
+  if (error) throw new Error(error.message)
+}
+
+// ─── Digest Profile CRUD ───────────────────────────────────────────────────────
+
+export async function createDigestProfile(
+  profile: {
+    title: string
+    frequency: 'daily' | 'weekly' | 'monthly'
+    density: 'brief' | 'standard' | 'comprehensive'
+    schedule_time: string
+    schedule_timezone: string
+    is_active?: boolean
+  },
+  modules: DigestModuleInput[],
+  channels: DigestChannelInput[]
+): Promise<string> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+
+  const { data: profileData, error: profileError } = await supabase
+    .from('digest_profiles')
+    .insert({ ...profile, user_id: user.id })
+    .select('id')
+    .single()
+
+  if (profileError) throw new Error(profileError.message)
+  const profileId = profileData.id
+
+  if (modules.length > 0) {
+    const moduleRows = modules.map((m, i) => ({
+      digest_profile_id: profileId,
+      user_id: user.id,
+      template_id: m.template_id,
+      custom_context: m.custom_context ?? null,
+      sort_order: m.sort_order ?? i,
+      is_active: true,
+    }))
+    const { error: modulesError } = await supabase.from('digest_modules').insert(moduleRows)
+    if (modulesError) throw new Error(modulesError.message)
+  }
+
+  if (channels.length > 0) {
+    const channelRows = channels.map(c => ({
+      digest_profile_id: profileId,
+      user_id: user.id,
+      channel_type: c.channel_type,
+      config: c.config,
+      density_override: c.density_override ?? null,
+      is_active: true,
+    }))
+    const { error: channelsError } = await supabase.from('digest_channels').insert(channelRows)
+    if (channelsError) throw new Error(channelsError.message)
+  }
+
+  return profileId
+}
+
+export async function updateDigestProfile(
+  profileId: string,
+  profile: {
+    title: string
+    frequency: 'daily' | 'weekly' | 'monthly'
+    density: 'brief' | 'standard' | 'comprehensive'
+    schedule_time: string
+    schedule_timezone: string
+    is_active?: boolean
+  },
+  modules: DigestModuleInput[],
+  channels: DigestChannelInput[]
+): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+
+  const { error: profileError } = await supabase
+    .from('digest_profiles')
+    .update({ ...profile, updated_at: new Date().toISOString() })
+    .eq('id', profileId)
+    .eq('user_id', user.id)
+
+  if (profileError) throw new Error(profileError.message)
+
+  // Replace modules: delete then re-insert
+  await supabase.from('digest_modules').delete().eq('digest_profile_id', profileId)
+  if (modules.length > 0) {
+    const moduleRows = modules.map((m, i) => ({
+      digest_profile_id: profileId,
+      user_id: user.id,
+      template_id: m.template_id,
+      custom_context: m.custom_context ?? null,
+      sort_order: m.sort_order ?? i,
+      is_active: true,
+    }))
+    const { error: modulesError } = await supabase.from('digest_modules').insert(moduleRows)
+    if (modulesError) throw new Error(modulesError.message)
+  }
+
+  // Replace channels: delete then re-insert
+  await supabase.from('digest_channels').delete().eq('digest_profile_id', profileId)
+  if (channels.length > 0) {
+    const channelRows = channels.map(c => ({
+      digest_profile_id: profileId,
+      user_id: user.id,
+      channel_type: c.channel_type,
+      config: c.config,
+      density_override: c.density_override ?? null,
+      is_active: true,
+    }))
+    const { error: channelsError } = await supabase.from('digest_channels').insert(channelRows)
+    if (channelsError) throw new Error(channelsError.message)
+  }
+}
+
+export async function deleteDigestProfile(profileId: string): Promise<void> {
+  const { error } = await supabase
+    .from('digest_profiles')
+    .delete()
+    .eq('id', profileId)
+  if (error) throw new Error(error.message)
+  // digest_modules, digest_channels, digest_history cascade-delete via FK
 }

@@ -1,4 +1,5 @@
-import { Bot } from 'lucide-react'
+import { Bot, Eye, Zap } from 'lucide-react'
+import { getTemplateById } from '../../config/digestTemplates'
 import type { DigestProfile } from '../../types/feed'
 
 function formatScheduleLabel(time: string, frequency: string): string {
@@ -22,9 +23,12 @@ function formatScheduleLabel(time: string, frequency: string): string {
 
 interface BriefingCardProps {
   profile: DigestProfile
+  onView?: () => void
+  onGenerateNow?: () => void
+  generating?: boolean
 }
 
-export function BriefingCard({ profile }: BriefingCardProps) {
+export function BriefingCard({ profile, onView, onGenerateNow, generating }: BriefingCardProps) {
   const isReady = profile.status === 'ready'
   const activeModules = profile.modules
     .filter(m => m.isActive)
@@ -87,44 +91,69 @@ export function BriefingCard({ profile }: BriefingCardProps) {
         </span>
       </div>
 
-      {/* Module tags */}
+      {/* Module tags — human-readable names */}
       {activeModules.length > 0 && (
-        <div
-          className="flex flex-wrap gap-1"
-          style={{ marginBottom: isReady ? 8 : 0 }}
-        >
-          {activeModules.map(m => (
-            <span
-              key={m.id}
-              className="font-body"
-              style={{
-                fontSize: 10,
-                color: 'var(--color-text-secondary)',
-                background: 'var(--color-bg-inset)',
-                padding: '2px 7px',
-                borderRadius: 4,
-              }}
-            >
-              {m.templateId}
-            </span>
-          ))}
+        <div className="flex flex-wrap gap-1" style={{ marginBottom: 10 }}>
+          {activeModules.map(m => {
+            const template = getTemplateById(m.templateId)
+            return (
+              <span
+                key={m.id}
+                className="font-body"
+                style={{
+                  fontSize: 10,
+                  color: 'var(--color-text-secondary)',
+                  background: 'var(--color-bg-inset)',
+                  padding: '2px 7px',
+                  borderRadius: 4,
+                }}
+              >
+                {template?.name ?? m.templateId}
+              </span>
+            )
+          })}
         </div>
       )}
 
-      {/* Preview text — only for ready status */}
-      {isReady && (
-        <p
-          className="font-body"
-          style={{
-            fontSize: 12,
-            color: 'var(--color-text-body)',
-            lineHeight: 1.4,
-            fontStyle: 'italic',
-          }}
-        >
-          Your briefing is ready to view.
-        </p>
-      )}
+      {/* Action buttons */}
+      <div className="flex items-center gap-2">
+        <div className="flex-1" />
+        {isReady && onView && (
+          <button
+            type="button"
+            onClick={onView}
+            className="flex items-center gap-1.5 font-body font-semibold cursor-pointer rounded-md"
+            style={{
+              fontSize: 11,
+              padding: '5px 10px',
+              background: 'var(--color-bg-inset)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--color-text-body)',
+            }}
+          >
+            <Eye size={11} /> View
+          </button>
+        )}
+        {onGenerateNow && (
+          <button
+            type="button"
+            onClick={onGenerateNow}
+            disabled={generating}
+            className="flex items-center gap-1.5 font-body font-semibold cursor-pointer rounded-md"
+            style={{
+              fontSize: 11,
+              padding: '5px 10px',
+              background: generating ? 'var(--color-bg-inset)' : 'var(--color-accent-500)',
+              border: 'none',
+              color: generating ? 'var(--color-text-secondary)' : '#fff',
+              cursor: generating ? 'not-allowed' : 'pointer',
+            }}
+          >
+            <Zap size={11} />
+            {generating ? 'Generating…' : 'Generate Now'}
+          </button>
+        )}
+      </div>
     </div>
   )
 }

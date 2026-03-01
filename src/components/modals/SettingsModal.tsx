@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react'
 import {
   User, Anchor, Zap, Calendar, Link, X, Plus, Check, Loader2,
-  CalendarDays, type LucideIcon,
+  type LucideIcon,
 } from 'lucide-react'
 import { useSettings } from '../../hooks/useSettings'
 import { useAutoResize } from '../../hooks/useAutoResize'
@@ -10,6 +10,7 @@ import { AnchorPicker } from '../shared/AnchorPicker'
 import { Dot } from '../ui/Dot'
 import { SectionLabel } from '../ui/SectionLabel'
 import { getNodeConnectionCount, supabase } from '../../services/supabase'
+import { DigestsTab } from '../settings/DigestsTab'
 import type { KnowledgeNode } from '../../types/database'
 
 // ─── Tab config ───────────────────────────────────────────────────────────────
@@ -533,103 +534,6 @@ function ExtractionTab() {
             </button>
           )
         })}
-      </div>
-    </div>
-  )
-}
-
-// ─── Digests Tab ──────────────────────────────────────────────────────────────
-
-interface DigestProfile {
-  id: string
-  title: string
-  frequency: string
-  modules: string[]
-}
-
-function DigestsTab() {
-  const [digests, setDigests] = useState<DigestProfile[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    supabase
-      .from('digest_profiles')
-      .select('*')
-      .then(({ data }) => {
-        setDigests((data ?? []) as DigestProfile[])
-        setLoading(false)
-      })
-  }, [])
-
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center" style={{ minHeight: 200 }}>
-        <Loader2 size={20} className="animate-spin" style={{ color: 'var(--color-text-secondary)' }} />
-      </div>
-    )
-  }
-
-  if (digests.length === 0) {
-    return (
-      <div className="flex flex-col items-center gap-4" style={{ paddingTop: 48 }}>
-        <CalendarDays size={28} strokeWidth={1.4} style={{ color: 'var(--color-text-placeholder)' }} />
-        <div className="text-center">
-          <p className="font-body" style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
-            No digests configured yet.
-          </p>
-          <p className="font-body" style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 4 }}>
-            Briefings will be available in a future update.
-          </p>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div>
-      <p className="font-body" style={{ fontSize: 13, color: 'var(--color-text-secondary)', lineHeight: 1.5, marginBottom: 16 }}>
-        Automated intelligence digests from your knowledge graph.
-      </p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {digests.map(digest => (
-          <div
-            key={digest.id}
-            style={{
-              background: 'var(--color-bg-frame)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 8,
-              padding: '14px 18px',
-            }}
-          >
-            <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
-              <span className="font-body font-semibold" style={{ fontSize: 14, color: 'var(--color-text-primary)' }}>
-                {digest.title}
-              </span>
-              <span className="font-body font-semibold uppercase" style={{ fontSize: 10, color: 'var(--color-text-secondary)', letterSpacing: '0.08em' }}>
-                {digest.frequency}
-              </span>
-            </div>
-            {Array.isArray(digest.modules) && digest.modules.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {digest.modules.map((mod: string) => (
-                  <span
-                    key={mod}
-                    className="font-body"
-                    style={{
-                      fontSize: 10,
-                      color: 'var(--color-text-secondary)',
-                      background: 'var(--color-bg-inset)',
-                      padding: '2px 7px',
-                      borderRadius: 4,
-                    }}
-                  >
-                    {mod}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
       </div>
     </div>
   )
