@@ -8,14 +8,17 @@ interface CitationBadgesProps {
 }
 
 export function CitationBadges({ citations }: CitationBadgesProps) {
-  const { setRightPanelContent } = useGraphContext()
+  const { setRightPanelContent, addRecentNode } = useGraphContext()
 
   if (citations.length === 0) return null
 
   const handleCitationClick = async (citation: Citation) => {
     if (!citation.node_id) return
     const node = await fetchNodeById(citation.node_id)
-    if (node) setRightPanelContent({ type: 'node', data: node })
+    if (node) {
+      setRightPanelContent({ type: 'node', data: node })
+      addRecentNode(node)
+    }
   }
 
   return (

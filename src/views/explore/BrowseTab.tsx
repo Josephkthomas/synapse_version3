@@ -81,7 +81,7 @@ export function BrowseTab({ viewMode, onTotalCountChange }: BrowseTabProps) {
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const confidenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const { selectedNodeId, setSelectedNodeId, setRightPanelContent } = useGraphContext()
+  const { selectedNodeId, setSelectedNodeId, setRightPanelContent, addRecentNode } = useGraphContext()
   const { entityTypes, sourceTypes, tags, anchors } = useFilterOptions()
 
   // Debounce search
@@ -170,7 +170,8 @@ export function BrowseTab({ viewMode, onTotalCountChange }: BrowseTabProps) {
   const handleSelectNode = useCallback((node: NodeWithMeta) => {
     setSelectedNodeId(node.id)
     setRightPanelContent({ type: 'node', data: node })
-  }, [setSelectedNodeId, setRightPanelContent])
+    addRecentNode(node)
+  }, [setSelectedNodeId, setRightPanelContent, addRecentNode])
 
   const handleNavigateToNeighbor = useCallback(async (neighbor: NodeNeighbor) => {
     try {
@@ -178,11 +179,12 @@ export function BrowseTab({ viewMode, onTotalCountChange }: BrowseTabProps) {
       if (node) {
         setSelectedNodeId(node.id)
         setRightPanelContent({ type: 'node', data: node })
+        addRecentNode(node)
       }
     } catch (err) {
       console.error('Navigation failed:', err)
     }
-  }, [setSelectedNodeId, setRightPanelContent])
+  }, [setSelectedNodeId, setRightPanelContent, addRecentNode])
 
   const pageSize = 50
   const totalPages = Math.ceil(totalCount / pageSize)

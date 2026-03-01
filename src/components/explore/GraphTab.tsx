@@ -180,6 +180,7 @@ export function GraphTab() {
     setSelectedNodeId,
     setRightPanelContent,
     clearRightPanel,
+    addRecentNode,
   } = useGraphContext()
 
   const { data, loading, error, refetch } = useGraphData(graphScope)
@@ -201,7 +202,9 @@ export function GraphTab() {
         .eq('id', node.id)
         .maybeSingle()
       if (kn) {
-        setRightPanelContent({ type: 'node', data: kn as import('../../types/database').KnowledgeNode })
+        const knNode = kn as import('../../types/database').KnowledgeNode
+        setRightPanelContent({ type: 'node', data: knNode })
+        addRecentNode(knNode)
       }
     } else {
       // Fetch the full KnowledgeSource for SourceDetail
@@ -214,7 +217,7 @@ export function GraphTab() {
         setRightPanelContent({ type: 'source', data: ks as KnowledgeSource })
       }
     }
-  }, [setSelectedNodeId, setRightPanelContent])
+  }, [setSelectedNodeId, setRightPanelContent, addRecentNode])
 
   const handleExpandNode = useCallback(async (nodeId: string, kind: 'source' | 'anchor') => {
     if (expandedNodeId === nodeId) {

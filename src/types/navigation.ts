@@ -1,3 +1,5 @@
+import type { KnowledgeNode } from './database'
+
 export interface NavItem {
   id: string
   label: string
@@ -9,6 +11,7 @@ export interface CommandPaletteItem {
   id: string
   label: string
   type: string
-  category: 'Anchors' | 'Nodes' | 'Navigation'
+  category: 'Anchors' | 'Recent' | 'Nodes' | 'Navigation'
+  nodeData?: KnowledgeNode
   action: () => void
 }

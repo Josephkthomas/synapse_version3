@@ -118,6 +118,22 @@ export async function searchNodes(query: string, limit: number = 20): Promise<Kn
   return (data ?? []) as KnowledgeNode[]
 }
 
+export async function searchNodesByLabel(query: string, limit: number = 15): Promise<KnowledgeNode[]> {
+  const { data, error } = await supabase
+    .from('knowledge_nodes')
+    .select('id, label, entity_type, description, is_anchor, created_at')
+    .ilike('label', `%${query}%`)
+    .order('is_anchor', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (error) {
+    console.error('Command palette search failed:', error)
+    return []
+  }
+  return (data ?? []) as KnowledgeNode[]
+}
+
 // ─── Node Fetching ────────────────────────────────────────────────────────────
 
 export async function fetchNodes(
@@ -617,7 +633,7 @@ export async function getGraphStats(userId: string): Promise<{
   }
 }
 
-// ─── RAG: Semantic Search on Source Chunks ────────────────────────────────────
+// ─── RAG: Chunk Search ────────────────────────────────────────────────────────
 
 export interface SemanticChunkResult {
   id: string
@@ -627,30 +643,53 @@ export interface SemanticChunkResult {
   similarity: number
 }
 
-export async function semanticSearchChunks(
-  embedding: number[],
+/** Keyword search on source_chunks.content — no embedding/RPC dependency */
+export async function keywordSearchChunks(
+  query: string,
   userId: string,
-  options: { matchThreshold?: number; matchCount?: number } = {}
+  options: { limit?: number } = {}
 ): Promise<SemanticChunkResult[]> {
-  const { matchThreshold = 0.5, matchCount = 15 } = options
+  const { limit = 12 } = options
+  if (!query.trim()) return []
 
-  try {
-    const { data, error } = await supabase.rpc('match_source_chunks', {
-      query_embedding: embedding,
-      match_threshold: matchThreshold,
-      match_count: matchCount,
-      p_user_id: userId,
-    })
+  const terms = query
+    .trim()
+    .split(/\s+/)
+    .map(w => w.replace(/[^a-zA-Z0-9]/g, ''))
+    .filter(w => w.length >= 3)
+    .slice(0, 5)
+  const searchTerms = terms.length > 0 ? terms : [query.trim()]
+  const orFilter = searchTerms.map(term => `content.ilike.%${term}%`).join(',')
 
-    if (error) {
-      console.warn('[supabase] match_source_chunks RPC failed:', error.message)
-      return []
-    }
-    return (data ?? []) as SemanticChunkResult[]
-  } catch (err) {
-    console.warn('[supabase] Semantic search failed:', err)
+  const { data, error } = await supabase
+    .from('source_chunks')
+    .select('id, source_id, chunk_index, content')
+    .eq('user_id', userId)
+    .or(orFilter)
+    .limit(limit)
+
+  if (error) {
+    console.warn('[supabase] Keyword chunk search failed:', error.message)
     return []
   }
+
+  type RawChunk = { id: string; source_id: string; chunk_index: number; content: string }
+  return (data ?? []).map((chunk: RawChunk) => ({
+    id: chunk.id,
+    source_id: chunk.source_id,
+    chunk_index: chunk.chunk_index,
+    content: chunk.content,
+    similarity: 1.0,
+  }))
+}
+
+/** @deprecated Use keywordSearchChunks instead. Kept for potential future use. */
+export async function semanticSearchChunks(
+  _embedding: number[],
+  _userId: string,
+  _options: { matchThreshold?: number; matchCount?: number } = {}
+): Promise<SemanticChunkResult[]> {
+  return []
 }
 
 // ─── RAG: Keyword Search on Nodes ────────────────────────────────────────────
@@ -677,11 +716,24 @@ export async function keywordSearchNodes(
   const { limit = 10 } = options
   if (!query.trim()) return []
 
+  // Split query into individual terms so "AI upskilling workshop" finds nodes
+  // matching any of: "AI", "upskilling", "workshop" — not the full phrase
+  const terms = query
+    .trim()
+    .split(/\s+/)
+    .map(w => w.replace(/[^a-zA-Z0-9]/g, ''))
+    .filter(w => w.length >= 3)
+    .slice(0, 6)
+  const searchTerms = terms.length > 0 ? terms : [query.trim()]
+  const orFilter = searchTerms
+    .flatMap(term => [`label.ilike.%${term}%`, `description.ilike.%${term}%`])
+    .join(',')
+
   const { data, error } = await supabase
     .from('knowledge_nodes')
     .select('id, label, entity_type, description, source, source_type, source_id, confidence, is_anchor, tags, created_at')
     .eq('user_id', userId)
-    .or(`label.ilike.%${query}%,description.ilike.%${query}%`)
+    .or(orFilter)
     .order('created_at', { ascending: false })
     .limit(limit)
 
@@ -710,11 +762,21 @@ export async function keywordSearchSources(
   const { limit = 5 } = options
   if (!query.trim()) return []
 
+  const terms = query
+    .trim()
+    .split(/\s+/)
+    .map(w => w.replace(/[^a-zA-Z0-9]/g, ''))
+    .filter(w => w.length >= 3)
+    .slice(0, 6)
+  const searchTerms = terms.length > 0 ? terms : [query.trim()]
+  // Only search title — content column may be absent or very large
+  const orFilter = searchTerms.map(term => `title.ilike.%${term}%`).join(',')
+
   const { data, error } = await supabase
     .from('knowledge_sources')
     .select('id, title, source_type, source_url, created_at')
     .eq('user_id', userId)
-    .or(`title.ilike.%${query}%,content.ilike.%${query}%`)
+    .or(orFilter)
     .order('created_at', { ascending: false })
     .limit(limit)
 
@@ -854,6 +916,34 @@ export async function fetchTopAnchor(userId: string): Promise<string | null> {
   // For simplicity, return the first anchor's label
   // A more thorough implementation would sort by edge count
   return anchors[0]?.label ?? null
+}
+
+// ─── RAG: Fallback Context Nodes ─────────────────────────────────────────────
+
+/** Fetch anchor nodes (or most-recent nodes) to seed context when search returns empty */
+export async function fetchTopNodes(
+  userId: string,
+  options: { limit?: number; anchorsOnly?: boolean } = {}
+): Promise<KeywordNodeResult[]> {
+  const { limit = 15, anchorsOnly = false } = options
+
+  let query = supabase
+    .from('knowledge_nodes')
+    .select('id, label, entity_type, description, source, source_type, source_id, confidence, is_anchor, tags, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (anchorsOnly) {
+    query = query.eq('is_anchor', true)
+  }
+
+  const { data, error } = await query
+  if (error) {
+    console.warn('[supabase] fetchTopNodes failed:', error.message)
+    return []
+  }
+  return (data ?? []) as KeywordNodeResult[]
 }
 
 // ─── YouTube Playlists ───────────────────────────────────────────────────────

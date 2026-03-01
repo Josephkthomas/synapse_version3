@@ -51,7 +51,10 @@ export function AppShell() {
       </div>
 
       {commandPaletteOpen && (
-        <CommandPalette onClose={() => setCommandPaletteOpen(false)} />
+        <CommandPalette
+          onClose={() => setCommandPaletteOpen(false)}
+          onOpenSettings={() => { setCommandPaletteOpen(false); setSettingsOpen(true) }}
+        />
       )}
 
       {settingsOpen && (
