@@ -1,7 +1,11 @@
 import { createClient } from '@supabase/supabase-js'
-import type { UserProfile, ExtractionSettings, KnowledgeNode, KnowledgeEdge } from '../types/database'
+import type { UserProfile, ExtractionSettings, KnowledgeNode, KnowledgeEdge, KnowledgeSource } from '../types/database'
 import type { NodeFilters, PaginationOptions, NodeWithMeta, NodeNeighbor } from '../types/nodes'
 import type { CrossConnection } from '../types/feed'
+import type { ExtractionSession } from '../types/extraction'
+import type { YouTubePlaylist, QueueStats, PlaylistSettings } from '../types/youtube'
+import type { QueueItem, QueueStatusFilter, ScanHistoryEntry, YouTubeChannel, YouTubeSettings, AutomationSummary } from '../types/automate'
+import { generateSynapseCode } from './youtube'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -532,4 +536,769 @@ export async function fetchCrossConnectionsForSource(
   }
 
   return results
+}
+
+// --- Extraction History ---
+
+export async function fetchExtractionSessions(
+  limit: number = 20,
+  offset: number = 0
+): Promise<ExtractionSession[]> {
+  try {
+    const { data, error } = await supabase
+      .from('extraction_sessions')
+      .select(
+        'id, source_name, source_type, source_content_preview, extraction_mode, anchor_emphasis, user_guidance, selected_anchor_ids, entity_count, relationship_count, extraction_duration_ms, feedback_rating, feedback_text, created_at'
+      )
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1)
+
+    if (error) {
+      console.warn('[supabase] Failed to fetch extraction sessions:', error.message)
+      return []
+    }
+
+    return (data ?? []) as ExtractionSession[]
+  } catch (err) {
+    console.warn('[supabase] extraction_sessions table may not exist:', err)
+    return []
+  }
+}
+
+// --- Duplicate Node Detection ---
+
+export async function checkDuplicateNodes(
+  labels: string[],
+  _userId: string
+): Promise<Set<string>> {
+  if (labels.length === 0) return new Set()
+
+  const lowerLabels = labels.map(l => l.toLowerCase())
+  const { data, error } = await supabase
+    .from('knowledge_nodes')
+    .select('label')
+    .in('label', labels)
+
+  if (error) {
+    console.warn('[supabase] Failed to check duplicate nodes:', error.message)
+    return new Set()
+  }
+
+  const existing = new Set<string>()
+  for (const row of data ?? []) {
+    if (lowerLabels.includes(row.label.toLowerCase())) {
+      existing.add(row.label.toLowerCase())
+    }
+  }
+
+  return existing
+}
+
+// ─── RAG: Graph Stats ─────────────────────────────────────────────────────────
+
+export async function getGraphStats(userId: string): Promise<{
+  nodeCount: number
+  chunkCount: number
+  edgeCount: number
+  sourceCount: number
+}> {
+  const [nodes, chunks, edges, sources] = await Promise.all([
+    supabase.from('knowledge_nodes').select('id', { count: 'exact', head: true }).eq('user_id', userId),
+    supabase.from('source_chunks').select('id', { count: 'exact', head: true }).eq('user_id', userId).not('embedding', 'is', null),
+    supabase.from('knowledge_edges').select('id', { count: 'exact', head: true }).eq('user_id', userId),
+    supabase.from('knowledge_sources').select('id', { count: 'exact', head: true }).eq('user_id', userId),
+  ])
+
+  return {
+    nodeCount: nodes.count ?? 0,
+    chunkCount: chunks.count ?? 0,
+    edgeCount: edges.count ?? 0,
+    sourceCount: sources.count ?? 0,
+  }
+}
+
+// ─── RAG: Semantic Search on Source Chunks ────────────────────────────────────
+
+export interface SemanticChunkResult {
+  id: string
+  source_id: string
+  chunk_index: number
+  content: string
+  similarity: number
+}
+
+export async function semanticSearchChunks(
+  embedding: number[],
+  userId: string,
+  options: { matchThreshold?: number; matchCount?: number } = {}
+): Promise<SemanticChunkResult[]> {
+  const { matchThreshold = 0.5, matchCount = 15 } = options
+
+  try {
+    const { data, error } = await supabase.rpc('match_source_chunks', {
+      query_embedding: embedding,
+      match_threshold: matchThreshold,
+      match_count: matchCount,
+      p_user_id: userId,
+    })
+
+    if (error) {
+      console.warn('[supabase] match_source_chunks RPC failed:', error.message)
+      return []
+    }
+    return (data ?? []) as SemanticChunkResult[]
+  } catch (err) {
+    console.warn('[supabase] Semantic search failed:', err)
+    return []
+  }
+}
+
+// ─── RAG: Keyword Search on Nodes ────────────────────────────────────────────
+
+export interface KeywordNodeResult {
+  id: string
+  label: string
+  entity_type: string
+  description: string | null
+  source: string | null
+  source_type: string | null
+  source_id: string | null
+  confidence: number | null
+  is_anchor: boolean
+  tags: string[] | null
+  created_at: string
+}
+
+export async function keywordSearchNodes(
+  query: string,
+  userId: string,
+  options: { limit?: number } = {}
+): Promise<KeywordNodeResult[]> {
+  const { limit = 10 } = options
+  if (!query.trim()) return []
+
+  const { data, error } = await supabase
+    .from('knowledge_nodes')
+    .select('id, label, entity_type, description, source, source_type, source_id, confidence, is_anchor, tags, created_at')
+    .eq('user_id', userId)
+    .or(`label.ilike.%${query}%,description.ilike.%${query}%`)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (error) {
+    console.warn('[supabase] Keyword node search failed:', error.message)
+    return []
+  }
+  return (data ?? []) as KeywordNodeResult[]
+}
+
+// ─── RAG: Keyword Search on Sources ──────────────────────────────────────────
+
+export interface KeywordSourceResult {
+  id: string
+  title: string | null
+  source_type: string | null
+  source_url: string | null
+  created_at: string
+}
+
+export async function keywordSearchSources(
+  query: string,
+  userId: string,
+  options: { limit?: number } = {}
+): Promise<KeywordSourceResult[]> {
+  const { limit = 5 } = options
+  if (!query.trim()) return []
+
+  const { data, error } = await supabase
+    .from('knowledge_sources')
+    .select('id, title, source_type, source_url, created_at')
+    .eq('user_id', userId)
+    .or(`title.ilike.%${query}%,content.ilike.%${query}%`)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+
+  if (error) {
+    console.warn('[supabase] Keyword source search failed:', error.message)
+    return []
+  }
+  return (data ?? []) as KeywordSourceResult[]
+}
+
+// ─── RAG: Graph Traversal ─────────────────────────────────────────────────────
+
+export async function traverseGraphFromNodes(
+  nodeIds: string[],
+  userId: string,
+  depth: number = 2
+): Promise<{ nodes: KnowledgeNode[]; edges: KnowledgeEdge[] }> {
+  if (nodeIds.length === 0) return { nodes: [], edges: [] }
+
+  const visitedNodeIds = new Set<string>(nodeIds)
+  const allEdges: KnowledgeEdge[] = []
+  let currentFrontier = [...nodeIds]
+
+  for (let hop = 0; hop < depth; hop++) {
+    if (currentFrontier.length === 0) break
+
+    // Cap frontier to avoid expensive queries
+    const cappedFrontier = currentFrontier.slice(0, 20)
+
+    const orFilter = cappedFrontier
+      .map(id => `source_node_id.eq.${id},target_node_id.eq.${id}`)
+      .join(',')
+
+    const { data: edges, error } = await supabase
+      .from('knowledge_edges')
+      .select('id, user_id, source_node_id, target_node_id, relation_type, evidence, weight, created_at')
+      .eq('user_id', userId)
+      .or(orFilter)
+
+    if (error || !edges || edges.length === 0) break
+
+    allEdges.push(...(edges as KnowledgeEdge[]))
+
+    const nextFrontier: string[] = []
+    for (const edge of edges as KnowledgeEdge[]) {
+      for (const neighborId of [edge.source_node_id, edge.target_node_id]) {
+        if (!visitedNodeIds.has(neighborId)) {
+          visitedNodeIds.add(neighborId)
+          nextFrontier.push(neighborId)
+        }
+      }
+    }
+    // Cap next frontier
+    currentFrontier = nextFrontier.slice(0, 20)
+  }
+
+  const allNodeIds = Array.from(visitedNodeIds)
+  if (allNodeIds.length === 0) return { nodes: [], edges: allEdges }
+
+  const { data: nodes, error: nodeError } = await supabase
+    .from('knowledge_nodes')
+    .select('id, user_id, label, entity_type, description, source, source_type, source_url, source_id, confidence, is_anchor, tags, user_tags, quote, created_at')
+    .in('id', allNodeIds)
+
+  if (nodeError) {
+    console.warn('[supabase] Node fetch in traversal failed:', nodeError.message)
+    return { nodes: [], edges: allEdges }
+  }
+
+  return {
+    nodes: (nodes ?? []) as KnowledgeNode[],
+    edges: allEdges,
+  }
+}
+
+// ─── RAG: Fetch Source Metadata Batch ────────────────────────────────────────
+
+export async function fetchSourcesByIds(
+  sourceIds: string[]
+): Promise<Map<string, { id: string; title: string | null; source_type: string | null; created_at: string }>> {
+  if (sourceIds.length === 0) return new Map()
+
+  const uniqueIds = [...new Set(sourceIds)]
+  const { data, error } = await supabase
+    .from('knowledge_sources')
+    .select('id, title, source_type, created_at')
+    .in('id', uniqueIds)
+
+  if (error || !data) return new Map()
+
+  return new Map(
+    (data as { id: string; title: string | null; source_type: string | null; created_at: string }[])
+      .map(s => [s.id, s])
+  )
+}
+
+export async function fetchSourceById(sourceId: string): Promise<KnowledgeSource | null> {
+  const { data, error } = await supabase
+    .from('knowledge_sources')
+    .select('*')
+    .eq('id', sourceId)
+    .single()
+  if (error || !data) return null
+  return data as KnowledgeSource
+}
+
+// ─── RAG: Fetch Nodes by IDs ──────────────────────────────────────────────────
+
+export async function fetchNodesByIds(nodeIds: string[]): Promise<KnowledgeNode[]> {
+  if (nodeIds.length === 0) return []
+  const uniqueIds = [...new Set(nodeIds)]
+  const { data, error } = await supabase
+    .from('knowledge_nodes')
+    .select('*')
+    .in('id', uniqueIds)
+
+  if (error) {
+    console.warn('[supabase] fetchNodesByIds failed:', error.message)
+    return []
+  }
+  return (data ?? []) as KnowledgeNode[]
+}
+
+// ─── RAG: Top Anchor ─────────────────────────────────────────────────────────
+
+export async function fetchTopAnchor(userId: string): Promise<string | null> {
+  // Get anchor with most connections
+  const { data: anchors } = await supabase
+    .from('knowledge_nodes')
+    .select('id, label')
+    .eq('user_id', userId)
+    .eq('is_anchor', true)
+    .limit(20)
+
+  if (!anchors?.length) return null
+
+  // For simplicity, return the first anchor's label
+  // A more thorough implementation would sort by edge count
+  return anchors[0]?.label ?? null
+}
+
+// ─── YouTube Playlists ───────────────────────────────────────────────────────
+
+export async function connectPlaylist(
+  userId: string,
+  playlistId: string,
+  playlistUrl: string,
+  metadata?: { name?: string; videoCount?: number; thumbnailUrl?: string }
+): Promise<YouTubePlaylist> {
+  const synapseCode = generateSynapseCode()
+
+  // Load default extraction settings
+  const { data: settings } = await supabase
+    .from('extraction_settings')
+    .select('default_mode, default_anchor_emphasis')
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  const payload: Record<string, unknown> = {
+    user_id: userId,
+    playlist_id: playlistId,
+    playlist_url: playlistUrl,
+    synapse_code: synapseCode,
+    extraction_mode: settings?.default_mode ?? 'comprehensive',
+    anchor_emphasis: settings?.default_anchor_emphasis ?? 'standard',
+    status: 'active',
+  }
+
+  if (metadata?.name) payload.playlist_name = metadata.name
+  if (metadata?.videoCount) payload.known_video_count = metadata.videoCount
+
+  const { data, error } = await supabase
+    .from('youtube_playlists')
+    .insert(payload)
+    .select()
+    .single()
+
+  if (error) {
+    if (error.code === '23505') {
+      throw new Error('This playlist is already connected.')
+    }
+    throw new Error(`Failed to connect playlist: ${error.message}`)
+  }
+
+  return data as YouTubePlaylist
+}
+
+export async function getConnectedPlaylists(userId: string): Promise<YouTubePlaylist[]> {
+  const { data, error } = await supabase
+    .from('youtube_playlists')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.warn('[supabase] Failed to fetch playlists:', error.message)
+    return []
+  }
+  return (data ?? []) as YouTubePlaylist[]
+}
+
+export async function updatePlaylistSettings(
+  playlistId: string,
+  settings: Partial<PlaylistSettings>
+): Promise<void> {
+  const payload: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  }
+  if (settings.extraction_mode) payload.extraction_mode = settings.extraction_mode
+  if (settings.anchor_emphasis) payload.anchor_emphasis = settings.anchor_emphasis
+  if (settings.linked_anchor_ids !== undefined) payload.linked_anchor_ids = settings.linked_anchor_ids
+  if (settings.custom_instructions !== undefined) payload.custom_instructions = settings.custom_instructions
+
+  const { error } = await supabase
+    .from('youtube_playlists')
+    .update(payload)
+    .eq('id', playlistId)
+
+  if (error) {
+    console.warn('[supabase] Failed to update playlist settings:', error.message)
+  }
+}
+
+export async function disconnectPlaylist(playlistId: string): Promise<void> {
+  const { error } = await supabase
+    .from('youtube_playlists')
+    .delete()
+    .eq('id', playlistId)
+
+  if (error) {
+    throw new Error(`Failed to disconnect playlist: ${error.message}`)
+  }
+}
+
+// ─── YouTube Queue ───────────────────────────────────────────────────────────
+
+export async function queueVideosForProcessing(
+  videos: { video_id: string; video_title: string; video_url: string; thumbnail_url?: string; published_at?: string }[],
+  _playlistId: string,
+  userId: string
+): Promise<number> {
+  const items = videos.map(v => ({
+    user_id: userId,
+    video_id: v.video_id,
+    video_title: v.video_title,
+    video_url: v.video_url,
+    thumbnail_url: v.thumbnail_url ?? null,
+    published_at: v.published_at ?? null,
+    status: 'pending',
+    priority: 5,
+  }))
+
+  const { data, error } = await supabase
+    .from('youtube_ingestion_queue')
+    .upsert(items, { onConflict: 'user_id,video_id', ignoreDuplicates: true })
+    .select('id')
+
+  if (error) {
+    console.warn('[supabase] Failed to queue videos:', error.message)
+    return 0
+  }
+  return data?.length ?? 0
+}
+
+export async function getQueueStats(userId: string): Promise<QueueStats> {
+  const statuses = ['pending', 'fetching_transcript', 'extracting', 'completed', 'failed'] as const
+
+  const counts = await Promise.all(
+    statuses.map(async status => {
+      const { count } = await supabase
+        .from('youtube_ingestion_queue')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .eq('status', status)
+      return { status, count: count ?? 0 }
+    })
+  )
+
+  const results: Record<string, number> = {}
+  for (const c of counts) {
+    results[c.status] = c.count
+  }
+
+  return {
+    pending: results['pending'] ?? 0,
+    processing: (results['fetching_transcript'] ?? 0) + (results['extracting'] ?? 0),
+    completed: results['completed'] ?? 0,
+    failed: results['failed'] ?? 0,
+  }
+}
+
+// ─── Enhanced Extraction History ─────────────────────────────────────────────
+
+export async function getExtractionHistory(
+  userId: string,
+  filters?: { sourceType?: string; status?: 'completed' | 'failed' },
+  pagination?: { offset: number; limit: number }
+): Promise<{ sessions: ExtractionSession[]; totalCount: number }> {
+  let query = supabase
+    .from('extraction_sessions')
+    .select(
+      'id, source_name, source_type, source_content_preview, extraction_mode, anchor_emphasis, user_guidance, selected_anchor_ids, entity_count, relationship_count, extraction_duration_ms, feedback_rating, feedback_text, created_at',
+      { count: 'exact' }
+    )
+    .eq('user_id', userId)
+
+  if (filters?.sourceType && filters.sourceType !== 'all') {
+    query = query.eq('source_type', filters.sourceType)
+  }
+
+  if (filters?.status === 'completed') {
+    query = query.gt('entity_count', 0)
+  } else if (filters?.status === 'failed') {
+    query = query.eq('entity_count', 0)
+  }
+
+  const offset = pagination?.offset ?? 0
+  const limit = pagination?.limit ?? 20
+
+  query = query
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1)
+
+  const { data, error, count } = await query
+
+  if (error) {
+    console.warn('[supabase] Failed to fetch extraction history:', error.message)
+    return { sessions: [], totalCount: 0 }
+  }
+
+  return {
+    sessions: (data ?? []) as ExtractionSession[],
+    totalCount: count ?? 0,
+  }
+}
+
+// ─── Automate: YouTube Channels ──────────────────────────────────────────────
+
+export async function getYouTubeChannels(userId: string): Promise<YouTubeChannel[]> {
+  try {
+    const { data, error } = await supabase
+      .from('youtube_channels')
+      .select('*')
+      .eq('user_id', userId)
+      .order('channel_name', { ascending: true })
+
+    if (error) throw error
+    return (data ?? []) as YouTubeChannel[]
+  } catch (err) {
+    console.warn('[supabase] youtube_channels fetch failed (table may not exist):', err)
+    return []
+  }
+}
+
+// ─── Automate: YouTube Settings ──────────────────────────────────────────────
+
+export async function getYouTubeSettings(userId: string): Promise<YouTubeSettings | null> {
+  try {
+    const { data, error } = await supabase
+      .from('youtube_settings')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle()
+
+    if (error) throw error
+    return data as YouTubeSettings | null
+  } catch (err) {
+    console.warn('[supabase] youtube_settings fetch failed (table may not exist):', err)
+    return null
+  }
+}
+
+// ─── Automate: Queue Items ───────────────────────────────────────────────────
+
+export async function getQueueItems(
+  userId: string,
+  filter: QueueStatusFilter = 'all',
+  pagination: { offset: number; limit: number } = { offset: 0, limit: 20 }
+): Promise<{ items: QueueItem[]; totalCount: number }> {
+  try {
+    let query = supabase
+      .from('youtube_ingestion_queue')
+      .select('*', { count: 'exact' })
+      .eq('user_id', userId)
+
+    switch (filter) {
+      case 'pending':
+        query = query.eq('status', 'pending')
+        break
+      case 'processing':
+        query = query.in('status', ['fetching_transcript', 'extracting'])
+        break
+      case 'completed':
+        query = query.eq('status', 'completed')
+        break
+      case 'failed':
+        query = query.eq('status', 'failed')
+        break
+    }
+
+    query = query
+      .order('created_at', { ascending: false })
+      .range(pagination.offset, pagination.offset + pagination.limit - 1)
+
+    const { data, error, count } = await query
+
+    if (error) throw error
+
+    return {
+      items: (data ?? []) as QueueItem[],
+      totalCount: count ?? 0,
+    }
+  } catch (err) {
+    console.warn('[supabase] Queue items fetch failed:', err)
+    return { items: [], totalCount: 0 }
+  }
+}
+
+// ─── Automate: Queue Actions ─────────────────────────────────────────────────
+
+export async function retryQueueItem(itemId: string): Promise<void> {
+  const { error } = await supabase
+    .from('youtube_ingestion_queue')
+    .update({
+      status: 'pending',
+      error_message: null,
+      started_at: null,
+      completed_at: null,
+    })
+    .eq('id', itemId)
+    .eq('status', 'failed')
+
+  if (error) throw new Error(`Failed to retry item: ${error.message}`)
+}
+
+export async function cancelQueueItem(itemId: string): Promise<void> {
+  const { error } = await supabase
+    .from('youtube_ingestion_queue')
+    .update({ status: 'skipped' })
+    .eq('id', itemId)
+    .eq('status', 'pending')
+
+  if (error) throw new Error(`Failed to cancel item: ${error.message}`)
+}
+
+export async function reQueueItem(itemId: string): Promise<void> {
+  const { error } = await supabase
+    .from('youtube_ingestion_queue')
+    .update({
+      status: 'pending',
+      error_message: null,
+      started_at: null,
+      completed_at: null,
+    })
+    .eq('id', itemId)
+    .eq('status', 'skipped')
+
+  if (error) throw new Error(`Failed to re-queue item: ${error.message}`)
+}
+
+export async function clearCompletedItems(userId: string): Promise<number> {
+  try {
+    const { data, error } = await supabase
+      .from('youtube_ingestion_queue')
+      .delete()
+      .eq('user_id', userId)
+      .eq('status', 'completed')
+      .select('id')
+
+    if (error) throw error
+    return data?.length ?? 0
+  } catch (err) {
+    console.warn('[supabase] clearCompletedItems failed:', err)
+    return 0
+  }
+}
+
+// ─── Automate: Scan History ──────────────────────────────────────────────────
+
+export async function getScanHistory(
+  userId: string,
+  limit: number = 10
+): Promise<ScanHistoryEntry[]> {
+  try {
+    const { data, error } = await supabase
+      .from('youtube_scan_history')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(limit)
+
+    if (error) throw error
+    return (data ?? []) as ScanHistoryEntry[]
+  } catch (err) {
+    console.warn('[supabase] youtube_scan_history fetch failed (table may not exist):', err)
+    return []
+  }
+}
+
+// ─── Automate: Automation Summary ────────────────────────────────────────────
+
+export async function getAutomationSummary(userId: string): Promise<AutomationSummary> {
+  const [
+    channelData,
+    playlistData,
+    meetingCount,
+    extensionCount,
+    queueStatsResult,
+    lastCompletedAt,
+  ] = await Promise.all([
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('youtube_channels')
+          .select('is_active, total_videos_ingested')
+          .eq('user_id', userId)
+        return (data ?? []) as { is_active: boolean; total_videos_ingested: number }[]
+      } catch { return [] as { is_active: boolean; total_videos_ingested: number }[] }
+    })(),
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('youtube_playlists')
+          .select('status, known_video_count')
+          .eq('user_id', userId)
+        return (data ?? []) as { status: string; known_video_count: number }[]
+      } catch { return [] as { status: string; known_video_count: number }[] }
+    })(),
+    (async () => {
+      try {
+        const { count } = await supabase
+          .from('knowledge_sources')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', userId)
+          .eq('source_type', 'Meeting')
+        return count ?? 0
+      } catch { return 0 }
+    })(),
+    (async () => {
+      try {
+        const { count } = await supabase
+          .from('knowledge_sources')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', userId)
+          .contains('metadata', { source: 'chrome_extension' })
+        return count ?? 0
+      } catch { return 0 }
+    })(),
+    getQueueStats(userId).catch(() => ({ pending: 0, processing: 0, completed: 0, failed: 0 })),
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('youtube_ingestion_queue')
+          .select('completed_at')
+          .eq('user_id', userId)
+          .eq('status', 'completed')
+          .order('completed_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        return (data?.completed_at as string) ?? null
+      } catch { return null }
+    })(),
+  ])
+
+  return {
+    youtube: {
+      channelCount: channelData.length,
+      activeChannelCount: channelData.filter(c => c.is_active).length,
+      totalVideosIngested: channelData.reduce((sum, c) => sum + (c.total_videos_ingested ?? 0), 0),
+      playlistCount: playlistData.length,
+      activePlaylistCount: playlistData.filter(p => p.status === 'active').length,
+      totalPlaylistVideos: playlistData.reduce((sum, p) => sum + (p.known_video_count ?? 0), 0),
+    },
+    meetings: {
+      totalMeetings: meetingCount,
+      circlebackConnected: meetingCount > 0,
+    },
+    extension: {
+      captureCount: extensionCount,
+      connected: extensionCount > 0,
+    },
+    queue: {
+      ...queueStatsResult,
+      lastCompletedAt: lastCompletedAt,
+    },
+  }
 }

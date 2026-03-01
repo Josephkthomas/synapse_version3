@@ -4,6 +4,7 @@ import {
   CalendarDays, type LucideIcon,
 } from 'lucide-react'
 import { useSettings } from '../../hooks/useSettings'
+import { useAutoResize } from '../../hooks/useAutoResize'
 import { EXTRACTION_MODES, ANCHOR_EMPHASIS_LEVELS } from '../../config/extractionModes'
 import { AnchorPicker } from '../shared/AnchorPicker'
 import { Dot } from '../ui/Dot'
@@ -53,11 +54,21 @@ function FocusInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   )
 }
 
-function FocusTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+function FocusTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { autoResize?: boolean }) {
+  const { autoResize, value, ...rest } = props
+  const autoRef = useAutoResize(String(value ?? ''))
+
   return (
     <textarea
-      {...props}
-      style={{ ...inputStyle, resize: 'vertical' } as React.CSSProperties}
+      {...rest}
+      value={value}
+      ref={autoResize ? autoRef : undefined}
+      style={{
+        ...inputStyle,
+        resize: autoResize ? 'none' : 'vertical',
+        overflow: autoResize ? 'hidden' : undefined,
+        lineHeight: 1.5,
+      } as React.CSSProperties}
       onFocus={e => {
         e.currentTarget.style.borderColor = 'rgba(214,58,0,0.3)'
         e.currentTarget.style.boxShadow = '0 0 0 3px var(--color-accent-50)'
@@ -161,6 +172,7 @@ function ProfileTab() {
         <FocusTextarea
           placeholder="Your role, industry, and current focus areas"
           rows={3}
+          autoResize
           value={professionalContext}
           onChange={e => setProfessionalContext(e.target.value)}
         />
@@ -171,6 +183,7 @@ function ProfileTab() {
         <FocusTextarea
           placeholder="Topics you care about, learning goals"
           rows={3}
+          autoResize
           value={personalInterests}
           onChange={e => setPersonalInterests(e.target.value)}
         />
@@ -181,6 +194,7 @@ function ProfileTab() {
         <FocusTextarea
           placeholder="How you want knowledge extracted (e.g., prioritize actionable insights)"
           rows={2}
+          autoResize
           value={processingPreferences}
           onChange={e => setProcessingPreferences(e.target.value)}
         />

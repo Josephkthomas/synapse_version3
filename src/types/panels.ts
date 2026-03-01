@@ -1,9 +1,11 @@
 import type { KnowledgeNode, KnowledgeSource } from './database'
+import type { RAGResponseContext } from './rag'
 
 export type RightPanelContent =
   | { type: 'node'; data: KnowledgeNode }
   | { type: 'source'; data: KnowledgeSource }
   | { type: 'feed'; data: FeedItem }
+  | { type: 'ask_context'; data: RAGResponseContext }
   | null
 
 export interface FeedItem {

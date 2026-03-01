@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import type { KnowledgeSource } from '../types/database'
-import type { FeedItem, FeedEntityBadge, CrossConnection, DailyStats } from '../types/feed'
+import type { FeedItem, FeedEntityBadge, CrossConnection, WithinSourceConnection, DailyStats } from '../types/feed'
 
 type PartialNode = {
   id: string
@@ -87,8 +87,11 @@ export async function fetchActivityFeed(
   const nodesBySource = new Map<string, PartialNode[]>()
   const nodeSourceMap = new Map<string, string>()
   const allNodeIds: string[] = []
+  // Comprehensive lookup for ALL page nodes (needed for cross-page-source edge resolution)
+  const allNodesByIdMap = new Map<string, PartialNode>()
 
   for (const n of allNodes) {
+    allNodesByIdMap.set(n.id, n)
     if (!n.source_id) continue
     const list = nodesBySource.get(n.source_id) ?? []
     list.push(n)
@@ -156,19 +159,32 @@ export async function fetchActivityFeed(
     ;(otherSrcs as SourceMeta[] | null)?.forEach(s => otherSourceMap.set(s.id, s))
   }
 
+  // Combined source map: page sources + external fetched sources
+  // This resolves titles for cross-page-source edges (source A node → source B node on same page)
+  const combinedSourceMap = new Map<string, SourceMeta>()
+  for (const s of pageSources) {
+    combinedSourceMap.set(s.id, { id: s.id, title: s.title ?? null, source_type: s.source_type ?? null })
+  }
+  otherSourceMap.forEach((v, k) => combinedSourceMap.set(k, v))
+
   // Assemble FeedItems
   const items: FeedItem[] = pageSources.map(source => {
     const sourceNodes = nodesBySource.get(source.id) ?? []
     const sourceNodeIdSet = new Set(sourceNodes.map(n => n.id))
 
     const entityCount = sourceNodes.length
-    const entities: FeedEntityBadge[] = sourceNodes.slice(0, 6).map(n => ({
+    const entities: FeedEntityBadge[] = sourceNodes.map(n => ({
       id: n.id,
       label: n.label,
       entityType: n.entity_type,
+      confidence: n.confidence ?? null,
     }))
 
+    // O(1) node lookup within this source
+    const sourceNodeMap = new Map(sourceNodes.map(n => [n.id, n]))
+
     let relationCount = 0
+    const withinSourceConnections: WithinSourceConnection[] = []
     const crossConnections: CrossConnection[] = []
 
     for (const edge of uniqueEdges) {
@@ -176,13 +192,32 @@ export async function fetchActivityFeed(
       const toIn = sourceNodeIdSet.has(edge.target_node_id)
 
       if (fromIn && toIn) {
+        // Both endpoints in this source — internal connection
         relationCount++
+        if (withinSourceConnections.length < 500) {
+          const fromNode = sourceNodeMap.get(edge.source_node_id)
+          const toNode = sourceNodeMap.get(edge.target_node_id)
+          if (fromNode && toNode) {
+            withinSourceConnections.push({
+              id: edge.id,
+              fromNodeId: edge.source_node_id,
+              fromLabel: fromNode.label,
+              fromEntityType: fromNode.entity_type,
+              toNodeId: edge.target_node_id,
+              toLabel: toNode.label,
+              toEntityType: toNode.entity_type,
+              relationType: edge.relation_type ?? 'relates_to',
+            })
+          }
+        }
       } else if (fromIn && !toIn) {
-        const otherNode = otherNodeMap.get(edge.target_node_id)
-        if (otherNode?.source_id && otherNode.source_id !== source.id) {
-          const fromNode = sourceNodes.find(n => n.id === edge.source_node_id)
-          const otherSrc = otherSourceMap.get(otherNode.source_id)
-          if (fromNode && crossConnections.length < 3) {
+        // Edge goes from this source to an outside node (external or another page source)
+        relationCount++
+        const otherNode = otherNodeMap.get(edge.target_node_id) ?? allNodesByIdMap.get(edge.target_node_id)
+        if (otherNode && crossConnections.length < 500) {
+          const fromNode = sourceNodeMap.get(edge.source_node_id)
+          const otherSrc = otherNode.source_id ? combinedSourceMap.get(otherNode.source_id) : null
+          if (fromNode) {
             crossConnections.push({
               id: edge.id,
               fromNodeId: edge.source_node_id,
@@ -199,11 +234,13 @@ export async function fetchActivityFeed(
           }
         }
       } else if (!fromIn && toIn) {
-        const otherNode = otherNodeMap.get(edge.source_node_id)
-        if (otherNode?.source_id && otherNode.source_id !== source.id) {
-          const toNode = sourceNodes.find(n => n.id === edge.target_node_id)
-          const otherSrc = otherSourceMap.get(otherNode.source_id)
-          if (toNode && crossConnections.length < 3) {
+        // Edge comes from an outside node (external or another page source) into this source
+        relationCount++
+        const otherNode = otherNodeMap.get(edge.source_node_id) ?? allNodesByIdMap.get(edge.source_node_id)
+        if (otherNode && crossConnections.length < 500) {
+          const toNode = sourceNodeMap.get(edge.target_node_id)
+          const otherSrc = otherNode.source_id ? combinedSourceMap.get(otherNode.source_id) : null
+          if (toNode) {
             crossConnections.push({
               id: edge.id,
               fromNodeId: edge.source_node_id,
@@ -227,7 +264,7 @@ export async function fetchActivityFeed(
       (metadata?.summary as string | null) ??
       (source.content ? source.content.slice(0, 200) + '...' : null)
 
-    return { source, entityCount, relationCount, entities, crossConnections, summary }
+    return { source, entityCount, relationCount, entities, withinSourceConnections, crossConnections, summary }
   })
 
   return { items, hasMore }

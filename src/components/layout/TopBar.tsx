@@ -77,6 +77,7 @@ export function TopBar({ onOpenSettings }: TopBarProps) {
             fontSize: 11,
             fontWeight: 700,
             lineHeight: 1,
+            marginRight: 4,
           }}
         >
           {initial}

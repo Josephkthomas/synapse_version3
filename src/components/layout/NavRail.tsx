@@ -211,7 +211,7 @@ export function NavRail({ onOpenCommandPalette, onOpenSettings }: NavRailProps) 
 
       {/* Nav items — center when collapsed, left-align when expanded */}
       <div
-        className="flex flex-col gap-1 pt-3"
+        className="flex flex-col gap-1 pt-7"
         style={{
           alignItems: expanded ? 'stretch' : 'center',
           paddingLeft: expanded ? 8 : 0,

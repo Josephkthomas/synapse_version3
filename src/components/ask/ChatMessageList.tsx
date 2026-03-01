@@ -1,0 +1,80 @@
+import { ChevronDown } from 'lucide-react'
+import { ChatMessage } from './ChatMessage'
+import { RAGProgressIndicator } from './RAGProgressIndicator'
+import type { ChatMessage as ChatMessageType, RAGPipelineStep } from '../../types/rag'
+import type { UseChatScrollReturn } from '../../hooks/useChatScroll'
+
+interface ChatMessageListProps {
+  messages: ChatMessageType[]
+  isLoading: boolean
+  currentStep: RAGPipelineStep | null
+  chunkCount?: number
+  scroll: UseChatScrollReturn
+}
+
+export function ChatMessageList({
+  messages,
+  isLoading,
+  currentStep,
+  chunkCount,
+  scroll,
+}: ChatMessageListProps) {
+  return (
+    <div
+      ref={scroll.scrollRef}
+      className="flex-1 overflow-y-auto relative"
+      onScroll={scroll.onScroll}
+      style={{ scrollBehavior: 'smooth' }}
+    >
+      <div
+        className="flex flex-col mx-auto"
+        style={{ maxWidth: 840, padding: '24px 48px', gap: 16 }}
+      >
+        {messages.map(message => (
+          <ChatMessage key={message.id} message={message} />
+        ))}
+
+        {isLoading && currentStep && (
+          <div className="flex justify-start">
+            <RAGProgressIndicator step={currentStep} chunkCount={chunkCount} />
+          </div>
+        )}
+
+        <div ref={scroll.bottomRef} style={{ height: 1 }} />
+      </div>
+
+      {/* Scroll pill */}
+      {scroll.showScrollPill && (
+        <div
+          className="absolute bottom-4 left-1/2 -translate-x-1/2"
+          style={{ zIndex: 10 }}
+        >
+          <button
+            type="button"
+            onClick={() => scroll.scrollToBottom()}
+            className="flex items-center font-body font-semibold cursor-pointer"
+            style={{
+              gap: 4,
+              fontSize: 11,
+              color: 'var(--color-accent-500)',
+              background: 'var(--color-bg-card)',
+              border: '1px solid var(--border-default)',
+              borderRadius: 8,
+              padding: '6px 12px',
+              animation: 'fade-in 0.2s ease',
+            }}
+          >
+            <ChevronDown size={12} />
+            New message
+          </button>
+          <style>{`
+            @keyframes fade-in {
+              from { opacity: 0 }
+              to { opacity: 1 }
+            }
+          `}</style>
+        </div>
+      )}
+    </div>
+  )
+}

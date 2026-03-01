@@ -1,0 +1,196 @@
+import { useState, useCallback, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useExtraction } from '../../hooks/useExtraction'
+import { MeetingTranscriptForm } from './MeetingTranscriptForm'
+import { IntegrationCard } from './IntegrationCard'
+import { IntegrationSetupModal } from './IntegrationSetupModal'
+import { ExtractionProgress } from './ExtractionProgress'
+import { ExtractionSummary } from './ExtractionSummary'
+import { EntityReview } from '../shared/EntityReview'
+import type { ExtractionConfig, ReviewEntity } from '../../types/extraction'
+import type { IntegrationConfig, MeetingSource } from '../../types/ingest'
+
+const INTEGRATIONS: IntegrationConfig[] = [
+  {
+    id: 'circleback',
+    name: 'Circleback',
+    icon: '🔵',
+    description: 'Auto-capture meeting transcripts',
+    status: 'not_connected',
+    comingSoon: false,
+    setupInstructions: [
+      'Go to your Circleback account settings.',
+      'Navigate to Integrations → Webhooks.',
+      'Click "Add Webhook" and paste your Synapse webhook URL.',
+      'Select "Transcript Ready" as the trigger event.',
+      'Save the webhook. New transcripts will auto-import.',
+    ],
+  },
+  {
+    id: 'fireflies',
+    name: 'Fireflies',
+    icon: '🟣',
+    description: 'AI meeting notes and transcripts',
+    status: 'not_connected',
+    comingSoon: true,
+    setupInstructions: [],
+  },
+  {
+    id: 'tldv',
+    name: 'tl;dv',
+    icon: '🟢',
+    description: 'Record and transcribe meetings',
+    status: 'not_connected',
+    comingSoon: true,
+    setupInstructions: [],
+  },
+  {
+    id: 'meetgeek',
+    name: 'MeetGeek',
+    icon: '🟡',
+    description: 'Meeting productivity assistant',
+    status: 'not_connected',
+    comingSoon: true,
+    setupInstructions: [],
+  },
+]
+
+export function MeetingsTab() {
+  const navigate = useNavigate()
+  const { state, start, approveAndSave, reExtract, reset } = useExtraction()
+  const [setupModal, setSetupModal] = useState<IntegrationConfig | null>(null)
+  const latestEntitiesRef = useRef<ReviewEntity[] | null>(null)
+
+  const handleExtract = useCallback(
+    async (meeting: MeetingSource, config: ExtractionConfig) => {
+      await start(meeting.transcript, config, {
+        title: meeting.title,
+        sourceType: 'Meeting',
+      })
+    },
+    [start]
+  )
+
+  const handleEntitiesChange = useCallback((entities: ReviewEntity[]) => {
+    latestEntitiesRef.current = entities
+  }, [])
+
+  const handleSave = useCallback(async () => {
+    const entities = latestEntitiesRef.current ?? state.entities
+    if (entities) {
+      await approveAndSave(entities)
+    }
+  }, [state.entities, approveAndSave])
+
+  const handleReExtract = useCallback(async () => {
+    await reExtract()
+  }, [reExtract])
+
+  const handleIngestAnother = useCallback(() => {
+    reset()
+    latestEntitiesRef.current = null
+  }, [reset])
+
+  const isIdle = state.step === 'idle'
+  const isReviewing = state.step === 'reviewing'
+  const isComplete = state.step === 'complete'
+  const isError = state.step === 'error'
+  const isRunning =
+    state.step === 'saving_source' ||
+    state.step === 'composing_prompt' ||
+    state.step === 'extracting' ||
+    state.step === 'saving_nodes' ||
+    state.step === 'generating_embeddings' ||
+    state.step === 'chunking_source' ||
+    state.step === 'discovering_connections'
+  const showProgress = isRunning || isReviewing || isError
+
+  return (
+    <div>
+      {/* Idle: show form + integrations */}
+      {isIdle && (
+        <>
+          <MeetingTranscriptForm onExtract={handleExtract} />
+
+          {/* Integrations section */}
+          <div style={{ marginTop: 24 }}>
+            <div
+              className="font-display font-bold"
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase' as const,
+                color: 'var(--color-text-secondary)',
+                marginBottom: 4,
+              }}
+            >
+              Integrations
+            </div>
+            <p
+              className="font-body"
+              style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 12 }}
+            >
+              Connect meeting transcript services for automatic ingestion.
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              {INTEGRATIONS.map(config => (
+                <IntegrationCard
+                  key={config.id}
+                  config={config}
+                  onConnect={() => setSetupModal(config)}
+                />
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Progress / Review / Error */}
+      {showProgress && (
+        <>
+          <ExtractionProgress
+            step={state.step}
+            statusText={state.statusText}
+            elapsedMs={state.elapsedMs}
+            embeddingProgress={state.embeddingProgress}
+            error={state.error}
+            onRetry={isError ? handleReExtract : undefined}
+            onCancel={isError ? handleIngestAnother : undefined}
+          />
+
+          {isReviewing && state.entities && state.relationships && (
+            <EntityReview
+              entities={latestEntitiesRef.current ?? state.entities}
+              relationships={state.relationships}
+              onEntitiesChange={handleEntitiesChange}
+              onSave={handleSave}
+              onReExtract={handleReExtract}
+              saving={false}
+            />
+          )}
+        </>
+      )}
+
+      {/* Complete */}
+      {isComplete && (
+        <ExtractionSummary
+          entityCount={state.savedNodes?.length ?? 0}
+          relationshipCount={state.savedEdgeIds?.length ?? 0}
+          crossConnectionCount={state.crossConnectionCount}
+          durationMs={state.elapsedMs}
+          duplicatesSkipped={state.duplicatesSkipped}
+          onViewInBrowse={() => navigate('/explore')}
+          onIngestAnother={handleIngestAnother}
+        />
+      )}
+
+      {/* Integration Setup Modal */}
+      <IntegrationSetupModal
+        integration={setupModal}
+        onClose={() => setSetupModal(null)}
+      />
+    </div>
+  )
+}

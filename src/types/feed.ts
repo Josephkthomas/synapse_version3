@@ -10,6 +10,18 @@ export interface FeedEntityBadge {
   id: string
   label: string
   entityType: string
+  confidence: number | null
+}
+
+export interface WithinSourceConnection {
+  id: string
+  fromNodeId: string
+  fromLabel: string
+  fromEntityType: string
+  toNodeId: string
+  toLabel: string
+  toEntityType: string
+  relationType: string
 }
 
 export interface CrossConnection {
@@ -31,6 +43,7 @@ export interface FeedItem {
   entityCount: number
   relationCount: number
   entities: FeedEntityBadge[]
+  withinSourceConnections: WithinSourceConnection[]
   crossConnections: CrossConnection[]
   summary: string | null
 }

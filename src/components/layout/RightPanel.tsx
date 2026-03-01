@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Anchor, Clock, Sparkles } from 'lucide-react'
+import { Anchor, Clock } from 'lucide-react'
 import { useGraphContext } from '../../hooks/useGraphContext'
 import { useSettings } from '../../hooks/useSettings'
 import { supabase } from '../../services/supabase'
@@ -8,6 +8,7 @@ import { Dot } from '../ui/Dot'
 import { SectionLabel } from '../ui/SectionLabel'
 import { NodeDetail } from '../panels/NodeDetail'
 import { SourceDetail } from '../panels/SourceDetail'
+import { AskRightPanel } from '../ask/AskRightPanel'
 import type { KnowledgeNode } from '../../types/database'
 
 function formatRelativeTime(dateStr: string): string {
@@ -115,55 +116,90 @@ function QuickAccess() {
   )
 }
 
-
-function AskContextPlaceholder() {
-  return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <div className="flex items-center gap-2 mb-3">
-          <Sparkles size={12} style={{ color: 'var(--color-text-secondary)' }} />
-          <SectionLabel>Related Subgraph</SectionLabel>
-        </div>
-        <div className="rounded-md p-4" style={{ background: 'var(--color-bg-inset)' }}>
-          <p className="font-body text-[11px] text-text-placeholder leading-relaxed">
-            Related subgraph will appear here when you ask a question.
-          </p>
-        </div>
-      </div>
-      <div>
-        <div className="flex items-center gap-2 mb-3">
-          <Clock size={12} style={{ color: 'var(--color-text-secondary)' }} />
-          <SectionLabel>Source Chunks</SectionLabel>
-        </div>
-        <div className="rounded-md p-4" style={{ background: 'var(--color-bg-inset)' }}>
-          <p className="font-body text-[11px] text-text-placeholder leading-relaxed">
-            Source chunks used as context will appear here.
-          </p>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 export function RightPanel() {
   const location = useLocation()
-  const { rightPanelContent, clearRightPanel } = useGraphContext()
+  const { rightPanelContent, clearRightPanel, askContext, setRightPanelContent } = useGraphContext()
   const isAskView = location.pathname === '/ask'
 
+  // Back-to-context handler for Ask view
+  const handleBackToAskContext = () => {
+    if (askContext) {
+      setRightPanelContent({ type: 'ask_context', data: askContext })
+    } else {
+      clearRightPanel()
+    }
+  }
+
   const renderContent = () => {
-    if (isAskView && !rightPanelContent) {
-      return <AskContextPlaceholder />
+    if (rightPanelContent?.type === 'ask_context') {
+      return <AskRightPanel context={rightPanelContent.data} />
     }
     if (rightPanelContent?.type === 'node') {
-      return <NodeDetail node={rightPanelContent.data} onClose={clearRightPanel} />
+      return (
+        <div className="flex flex-col gap-0">
+          {isAskView && askContext && (
+            <button
+              type="button"
+              onClick={handleBackToAskContext}
+              className="font-body font-semibold cursor-pointer mb-3 text-left"
+              style={{
+                fontSize: 11,
+                color: 'var(--color-text-secondary)',
+                background: 'none',
+                border: 'none',
+                padding: '0 0 8px 0',
+                borderBottom: '1px solid var(--border-subtle)',
+              }}
+            >
+              ← Back to Context
+            </button>
+          )}
+          <NodeDetail node={rightPanelContent.data} onClose={isAskView ? handleBackToAskContext : clearRightPanel} />
+        </div>
+      )
     }
     if (rightPanelContent?.type === 'source') {
-      return <SourceDetail source={rightPanelContent.data} onClose={clearRightPanel} />
+      return (
+        <div className="flex flex-col gap-0">
+          {isAskView && askContext && (
+            <button
+              type="button"
+              onClick={handleBackToAskContext}
+              className="font-body font-semibold cursor-pointer mb-3 text-left"
+              style={{
+                fontSize: 11,
+                color: 'var(--color-text-secondary)',
+                background: 'none',
+                border: 'none',
+                padding: '0 0 8px 0',
+                borderBottom: '1px solid var(--border-subtle)',
+              }}
+            >
+              ← Back to Context
+            </button>
+          )}
+          <SourceDetail source={rightPanelContent.data} onClose={isAskView ? handleBackToAskContext : clearRightPanel} />
+        </div>
+      )
+    }
+    // Ask view default state — if no context yet, show placeholder message
+    if (isAskView) {
+      return (
+        <div className="flex flex-col gap-3">
+          <p
+            className="font-body"
+            style={{ fontSize: 12, color: 'var(--color-text-placeholder)', lineHeight: 1.6 }}
+          >
+            Ask a question to see the context subgraph and source chunks used for the response.
+          </p>
+        </div>
+      )
     }
     return <QuickAccess />
   }
 
   const panelTitle = () => {
+    if (rightPanelContent?.type === 'ask_context') return 'Context'
     if (!rightPanelContent) return isAskView ? 'Context' : 'Quick Access'
     if (rightPanelContent.type === 'node') return 'Entity Detail'
     if (rightPanelContent.type === 'source') return 'Source Detail'
@@ -191,7 +227,16 @@ export function RightPanel() {
         </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto" style={{ padding: '16px 18px' }}>
+      <div
+        className="flex-1 overflow-y-auto"
+        style={{
+          padding: 24,
+          overflowX: 'hidden',
+          minWidth: 0,
+          overflowWrap: 'break-word',
+          wordBreak: 'break-word',
+        }}
+      >
         {renderContent()}
       </div>
     </aside>

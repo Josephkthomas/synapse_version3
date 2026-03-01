@@ -1,0 +1,147 @@
+import { useState, useRef, useCallback } from 'react'
+import { useAuth } from './useAuth'
+import { useGraphContext } from './useGraphContext'
+import { queryGraph, buildRAGResponseContext } from '../services/rag'
+import type { ChatMessage, RAGPipelineStep, RAGResponseContext } from '../types/rag'
+
+function generateId(): string {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36)
+}
+
+export interface UseRAGQueryReturn {
+  messages: ChatMessage[]
+  isLoading: boolean
+  currentStep: RAGPipelineStep | null
+  error: string | null
+  lastResponseContext: RAGResponseContext | null
+  sendMessage: (text: string) => Promise<void>
+  clearChat: () => void
+}
+
+export function useRAGQuery(): UseRAGQueryReturn {
+  const { user } = useAuth()
+  const { setRightPanelContent, setAskContext } = useGraphContext()
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [currentStep, setCurrentStep] = useState<RAGPipelineStep | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [lastResponseContext, setLastResponseContext] = useState<RAGResponseContext | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
+
+  const sendMessage = useCallback(async (text: string) => {
+    if (!user) return
+    if (!text.trim()) return
+
+    // Handle /clear command
+    if (text.trim() === '/clear') {
+      setMessages([])
+      setLastResponseContext(null)
+      setAskContext(null)
+      setRightPanelContent(null)
+      return
+    }
+
+    // Cancel any in-flight request
+    abortControllerRef.current?.abort()
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+
+    const userMessage: ChatMessage = {
+      id: generateId(),
+      role: 'user',
+      content: text,
+      timestamp: new Date(),
+    }
+
+    setMessages(prev => [...prev, userMessage])
+    setIsLoading(true)
+    setCurrentStep(null)
+    setError(null)
+
+    const startTime = Date.now()
+
+    try {
+      // Build conversation history from prior messages (last 3 exchanges = 6 messages)
+      const conversationHistory = messages
+        .slice(-6)
+        .filter(m => m.role !== 'system')
+        .map(m => ({ role: m.role, content: m.content }))
+
+      const response = await queryGraph(
+        text,
+        user.id,
+        conversationHistory,
+        (step) => {
+          if (!controller.signal.aborted) {
+            setCurrentStep(step)
+          }
+        },
+        controller.signal
+      )
+
+      if (controller.signal.aborted) return
+
+      const pipelineDurationMs = Date.now() - startTime
+      const ctx = buildRAGResponseContext(response)
+
+      const assistantMessage: ChatMessage = {
+        id: generateId(),
+        role: 'assistant',
+        content: response.answer,
+        citations: response.citations,
+        timestamp: new Date(),
+        pipelineDurationMs,
+      }
+
+      setMessages(prev => [...prev, assistantMessage])
+      setLastResponseContext(ctx)
+      setAskContext(ctx)
+      setRightPanelContent({ type: 'ask_context', data: ctx })
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
+
+      const errorText = err instanceof Error ? err.message : 'Unknown error'
+      setError(errorText)
+
+      let userFacingMessage = "I couldn't process that query. Please try again."
+
+      if (errorText.includes('429')) {
+        userFacingMessage = "The AI service is rate-limited. Please wait a moment before your next query."
+      } else if (errorText.includes('embedding') || errorText.includes('VITE_GEMINI_API_KEY')) {
+        userFacingMessage = "Failed to process your query — the embedding service is temporarily unavailable. Please try again in a moment."
+      } else if (errorText.includes('connect') || errorText.includes('network') || errorText.includes('fetch')) {
+        userFacingMessage = "Can't connect to the database. Check your internet connection."
+      }
+
+      const errorMessage: ChatMessage = {
+        id: generateId(),
+        role: 'system',
+        content: userFacingMessage,
+        timestamp: new Date(),
+      }
+
+      setMessages(prev => [...prev, errorMessage])
+    } finally {
+      setIsLoading(false)
+      setCurrentStep(null)
+    }
+  }, [user, messages, setRightPanelContent, setAskContext])
+
+  const clearChat = useCallback(() => {
+    setMessages([])
+    setLastResponseContext(null)
+    setAskContext(null)
+    setRightPanelContent(null)
+    setError(null)
+  }, [setRightPanelContent, setAskContext])
+
+  return {
+    messages,
+    isLoading,
+    currentStep,
+    error,
+    lastResponseContext,
+    sendMessage,
+    clearChat,
+  }
+}

@@ -1,6 +1,7 @@
 import { createContext, useState, useCallback, type ReactNode } from 'react'
 import type { RightPanelContent } from '../../types/panels'
 import type { GraphScope, EntityDot } from '../../types/graph'
+import type { RAGResponseContext } from '../../types/rag'
 
 export interface GraphContextValue {
   rightPanelContent: RightPanelContent
@@ -16,6 +17,9 @@ export interface GraphContextValue {
   setExpandedNodeId: (id: string | null) => void
   expandedEntities: EntityDot[] | null
   setExpandedEntities: (entities: EntityDot[] | null) => void
+  // Ask view state
+  askContext: RAGResponseContext | null
+  setAskContext: (ctx: RAGResponseContext | null) => void
 }
 
 export const GraphContext = createContext<GraphContextValue | null>(null)
@@ -26,6 +30,7 @@ export function GraphProvider({ children }: { children: ReactNode }) {
   const [graphScope, setGraphScope] = useState<GraphScope>('overview')
   const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null)
   const [expandedEntities, setExpandedEntities] = useState<EntityDot[] | null>(null)
+  const [askContext, setAskContext] = useState<RAGResponseContext | null>(null)
 
   const clearRightPanel = useCallback(() => setRightPanelContent(null), [])
 
@@ -48,6 +53,8 @@ export function GraphProvider({ children }: { children: ReactNode }) {
       setExpandedNodeId,
       expandedEntities,
       setExpandedEntities,
+      askContext,
+      setAskContext,
     }}>
       {children}
     </GraphContext.Provider>

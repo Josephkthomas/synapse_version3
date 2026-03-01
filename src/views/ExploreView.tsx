@@ -2,9 +2,15 @@ import { useState, useCallback } from 'react'
 import { List, LayoutGrid } from 'lucide-react'
 import { BrowseTab } from './explore/BrowseTab'
 import { GraphTab } from '../components/explore/GraphTab'
+import { ToggleGroup } from '../components/shared/ToggleGroup'
 
 type Tab = 'graph' | 'browse'
 type ViewMode = 'table' | 'cards'
+
+const TAB_OPTIONS: { key: Tab; label: string }[] = [
+  { key: 'graph', label: 'Graph' },
+  { key: 'browse', label: 'Browse' },
+]
 
 export function ExploreView() {
   const [activeTab, setActiveTab] = useState<Tab>('graph')
@@ -19,38 +25,19 @@ export function ExploreView() {
     <div className="flex flex-col h-full" style={{ background: 'var(--color-bg-content)' }}>
       {/* Tab bar */}
       <div
-        className="flex items-center shrink-0 px-4"
-        style={{
-          height: 44,
-          background: 'var(--color-bg-card)',
-          borderBottom: '1px solid var(--border-subtle)',
-        }}
+        className="flex items-center shrink-0 gap-4"
+        style={{ padding: '12px 16px' }}
       >
-        {/* Tabs */}
-        <div className="flex items-center gap-0 h-full">
-          {(['graph', 'browse'] as Tab[]).map(tab => (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => setActiveTab(tab)}
-              className="relative h-full px-4 font-body text-[12px] font-semibold cursor-pointer"
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: activeTab === tab ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-                borderBottom: activeTab === tab ? '2px solid var(--color-accent-500)' : '2px solid transparent',
-                transition: 'color 0.15s ease, border-color 0.15s ease',
-                marginBottom: -1,
-              }}
-            >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
-            </button>
-          ))}
-        </div>
+        <ToggleGroup
+          options={TAB_OPTIONS}
+          value={activeTab}
+          onChange={setActiveTab}
+          style={{ minWidth: 240 }}
+        />
 
         {/* Result count */}
         {activeTab === 'browse' && totalCount > 0 && (
-          <span className="font-body text-[11px] text-text-secondary ml-4">
+          <span className="font-body text-[11px] text-text-secondary">
             {totalCount.toLocaleString()} entities
           </span>
         )}
