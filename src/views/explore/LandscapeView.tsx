@@ -13,10 +13,12 @@ interface LandscapeViewProps {
   unclustered: UnclusteredEntity[]
   isClusterVisible: (cluster: ClusterData) => boolean
   onClusterClick: (cluster: ClusterData) => void
+  onZoomTransition?: (clusterId: string) => void
 }
 
 const MIN_ZOOM = 0.2
 const MAX_ZOOM = 4.0
+const TRANSITION_ZOOM = 2.0
 
 interface Camera { zoom: number; panX: number; panY: number }
 
@@ -26,6 +28,7 @@ export function LandscapeView({
   unclustered,
   isClusterVisible,
   onClusterClick,
+  onZoomTransition,
 }: LandscapeViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -58,6 +61,11 @@ export function LandscapeView({
 
   // Compute cluster layout positions
   const layoutClusters = useClusterLayout(clusters, size.width, size.height)
+
+  // Keep a ref to layoutClusters for use inside wheel event handler (avoids stale closure)
+  const layoutClustersRef = useRef(layoutClusters)
+  useEffect(() => { layoutClustersRef.current = layoutClusters }, [layoutClusters])
+  const hasTriggeredTransitionRef = useRef(false)
 
   // Tooltip state
   const [tooltip, setTooltip] = useState<{ data: TooltipData; x: number; y: number } | null>(null)
@@ -108,16 +116,53 @@ export function LandscapeView({
       const rect = el.getBoundingClientRect()
       const sx = e.clientX - rect.left
       const sy = e.clientY - rect.top
-      setCamera(prev => {
-        const newZoom = e.ctrlKey
-          ? Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.zoom * (1 - e.deltaY * 0.01)))
-          : Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.zoom * (e.deltaY < 0 ? 1.1 : 0.9)))
-        return {
-          zoom: newZoom,
-          panX: sx - (sx - prev.panX) / prev.zoom * newZoom,
-          panY: sy - (sy - prev.panY) / prev.zoom * newZoom,
+
+      const checkTransition = (newZoom: number, prevZoom: number, prevPanX: number, prevPanY: number) => {
+        if (!onZoomTransition || newZoom < TRANSITION_ZOOM || prevZoom >= TRANSITION_ZOOM || hasTriggeredTransitionRef.current) return
+        const worldX = (sx - prevPanX) / prevZoom
+        const worldY = (sy - prevPanY) / prevZoom
+        const focused = layoutClustersRef.current.find(c => {
+          const dx = worldX - c.position.cx
+          const dy = worldY - c.position.cy
+          return Math.sqrt(dx * dx + dy * dy) < c.position.r * 1.5
+        })
+        if (focused) {
+          hasTriggeredTransitionRef.current = true
+          setTimeout(() => onZoomTransition(focused.anchor.id), 0)
         }
-      })
+      }
+
+      if (e.ctrlKey) {
+        // Trackpad pinch or Ctrl+scroll → zoom around cursor
+        setCamera(prev => {
+          const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.zoom * (1 - e.deltaY * 0.01)))
+          checkTransition(newZoom, prev.zoom, prev.panX, prev.panY)
+          return {
+            zoom: newZoom,
+            panX: sx - (sx - prev.panX) / prev.zoom * newZoom,
+            panY: sy - (sy - prev.panY) / prev.zoom * newZoom,
+          }
+        })
+      } else if (Math.abs(e.deltaY) < 50 || Math.abs(e.deltaX) > 0) {
+        // Trackpad two-finger swipe → pan
+        setCamera(prev => ({
+          ...prev,
+          panX: prev.panX - e.deltaX,
+          panY: prev.panY - e.deltaY,
+        }))
+      } else {
+        // Mouse scroll wheel → zoom around cursor
+        setCamera(prev => {
+          const factor = e.deltaY < 0 ? 1.12 : 0.9
+          const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.zoom * factor))
+          checkTransition(newZoom, prev.zoom, prev.panX, prev.panY)
+          return {
+            zoom: newZoom,
+            panX: sx - (sx - prev.panX) / prev.zoom * newZoom,
+            panY: sy - (sy - prev.panY) / prev.zoom * newZoom,
+          }
+        })
+      }
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)

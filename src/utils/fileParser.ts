@@ -1,3 +1,5 @@
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.js?url'
+
 export const FILE_SIZE_LIMITS = {
   WARNING_BYTES: 10 * 1024 * 1024,   // 10MB
   MAX_BYTES: 50 * 1024 * 1024,       // 50MB
@@ -56,11 +58,8 @@ export async function extractTextFromFile(file: File): Promise<string> {
 async function extractPDFText(file: File): Promise<string> {
   const pdfjsLib = await import('pdfjs-dist')
 
-  // Configure worker — resolved at runtime, not build time
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    /* @vite-ignore */ 'pdfjs-dist/build/pdf.worker.mjs',
-    import.meta.url
-  ).toString()
+  // Use Vite's ?url import so the worker path is resolved correctly in both dev and build
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
   const arrayBuffer = await file.arrayBuffer()
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise

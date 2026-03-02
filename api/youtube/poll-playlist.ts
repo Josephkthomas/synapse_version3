@@ -233,6 +233,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .update({ known_video_count: totalCount })
             .eq('id', playlist.id);
 
+          // Backfill playlist_id on existing rows for this playlist's videos
+          // (handles rows inserted before the playlist_id column was added)
+          if (items.length > 0) {
+            await supabase
+              .from('youtube_ingestion_queue')
+              .update({ playlist_id: playlist.id })
+              .eq('user_id', userId)
+              .in('video_id', items.map(v => v.video_id))
+              .is('playlist_id', null);
+          }
+
           // Filter out already-queued videos
           const newItems = items.filter(v => !existingVideoIds.has(v.video_id));
 
@@ -253,6 +264,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   published_at: item.published_at,
                   status: 'pending',
                   priority: 5,
+                  playlist_id: playlist.id,
                 };
 
                 // Only include channel_id if we found a matching internal channel

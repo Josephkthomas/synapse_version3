@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useAuth } from '../../hooks/useAuth'
+import { SynapseLogo } from '../shared/SynapseLogo'
 
 export function LoginPage() {
   const { signIn, signUp } = useAuth()
@@ -50,24 +51,7 @@ export function LoginPage() {
         }}
       >
         {/* Logo mark */}
-        <div
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: 8,
-            background: 'var(--color-accent-500)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#ffffff',
-            fontFamily: 'var(--font-display)',
-            fontSize: 14,
-            fontWeight: 800,
-            lineHeight: 1,
-          }}
-        >
-          S
-        </div>
+        <SynapseLogo size={48} />
 
         {/* Wordmark */}
         <div

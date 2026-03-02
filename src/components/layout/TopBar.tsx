@@ -10,6 +10,7 @@ const VIEW_TITLES: Record<string, string> = {
   '/': 'Home',
   '/explore': 'Explore',
   '/ask': 'Ask',
+  '/capture': 'Capture',
   '/ingest': 'Ingest',
   '/automate': 'Automate',
 }
@@ -47,11 +48,13 @@ export function TopBar({ onOpenSettings, onOpenCommandPalette }: TopBarProps) {
 
   return (
     <header
-      className="flex items-center shrink-0 px-6"
+      className="flex items-center shrink-0"
       style={{
         height: 50,
         background: 'var(--color-bg-card)',
         borderBottom: '1px solid var(--border-subtle)',
+        paddingLeft: 32,
+        paddingRight: 32,
       }}
     >
       {/* View title */}

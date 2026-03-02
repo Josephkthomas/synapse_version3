@@ -5,13 +5,15 @@ import { LandscapeView } from './explore/LandscapeView'
 import { NeighborhoodView } from './explore/NeighborhoodView'
 import { SourceGraphView } from './explore/SourceGraphView'
 import { ExploreMetadataPanel } from './explore/ExploreMetadataPanel'
+import { EntityBrowserTab } from './explore/EntityBrowserTab'
 import { useExploreData } from '../hooks/useExploreData'
 import { useExploreFilters } from '../hooks/useExploreFilters'
-import type { ClusterData, EntityNode, SourceNode, SourceEdge } from '../types/explore'
+import { useEntityBrowser } from '../hooks/useEntityBrowser'
+import type { ClusterData, EntityNode, SourceNode, SourceEdge, SourceGraphAnchor } from '../types/explore'
 import type { EntityEdge } from '../services/exploreQueries'
 
 // ─── Layout constants ────────────────────────────────────────────────────────
-const DEFAULT_LEFT_PCT = 60
+const DEFAULT_LEFT_PCT = 67
 const MIN_LEFT_PCT = 30
 const MAX_LEFT_PCT = 80
 
@@ -33,16 +35,39 @@ export function ExploreView() {
     toggleSpotlight,
     setRecency,
     isClusterVisible,
+    toggleSourceType,
+    toggleConnType,
+    setSourceAnchorFilter,
   } = useExploreFilters()
+
+  // Entity browser — only fetches when entity-browser tab is active
+  const entityBrowser = useEntityBrowser(viewMode === 'entity-browser')
 
   // Track neighborhood entities + edges for metadata panel
   const [neighborhoodEntities, setNeighborhoodEntities] = useState<EntityNode[]>([])
   const [neighborhoodEdges, setNeighborhoodEdges] = useState<EntityEdge[]>([])
 
-  // Source graph data (managed by SourceGraphView, stored here for metadata panel)
+  // Source graph data (managed by SourceGraphView, stored here for metadata panel + toolbar)
   const [allSources, setAllSources] = useState<SourceNode[]>([])
   const [sourceEdges, setSourceEdges] = useState<SourceEdge[]>([])
+  const [sourceGraphAnchors, setSourceGraphAnchors] = useState<SourceGraphAnchor[]>([])
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
+
+  // Neighborhood edge-type visibility (lifted so toolbar can control it)
+  const [visibleEdgeTypes, setVisibleEdgeTypes] = useState<Set<string>>(
+    () => new Set(['direct', 'source', 'tag'])
+  )
+  const toggleNeighborhoodEdgeType = useCallback((type: string) => {
+    setVisibleEdgeTypes(prev => {
+      const next = new Set(prev)
+      if (next.has(type)) next.delete(type); else next.add(type)
+      return next
+    })
+  }, [])
+  const clearAllFilters = useCallback(() => {
+    toggleSpotlight(null)
+    setVisibleEdgeTypes(new Set(['direct', 'source', 'tag']))
+  }, [toggleSpotlight])
 
   // Resizable two-column layout
   const [leftWidthPct, setLeftWidthPct] = useState(DEFAULT_LEFT_PCT)
@@ -63,6 +88,12 @@ export function ExploreView() {
   }, [activeClusterId, clusters])
 
   const isNeighborhood = zoomLevel === 'neighborhood' && activeCluster !== null
+
+  // Unique source types present in data (for toolbar dropdown)
+  const sourceTypesPresent = useMemo(() => {
+    const types = new Set(allSources.map(s => s.sourceType))
+    return Array.from(types).sort()
+  }, [allSources])
 
   // Clear selection on Escape
   useEffect(() => {
@@ -112,6 +143,10 @@ export function ExploreView() {
     enterNeighborhood(cluster.anchor.id)
   }, [enterNeighborhood])
 
+  const handleZoomTransition = useCallback((clusterId: string) => {
+    enterNeighborhood(clusterId)
+  }, [enterNeighborhood])
+
   const handleSelectEntity = useCallback((entity: EntityNode | null) => {
     setSelectedEntityId(entity?.id ?? null)
   }, [setSelectedEntityId])
@@ -120,9 +155,10 @@ export function ExploreView() {
     setSelectedSourceId(source?.id ?? null)
   }, [])
 
-  const handleSourcesLoaded = useCallback((sources: SourceNode[], edges: SourceEdge[]) => {
+  const handleSourcesLoaded = useCallback((sources: SourceNode[], edges: SourceEdge[], anchors: SourceGraphAnchor[]) => {
     setAllSources(sources)
     setSourceEdges(edges)
+    setSourceGraphAnchors(anchors)
   }, [])
 
   const handleEntitiesLoaded = useCallback((entities: EntityNode[]) => {
@@ -143,53 +179,62 @@ export function ExploreView() {
     onViewModeChange: handleViewModeChange,
     filters,
     onToggleAnchor: toggleAnchor,
+    onEnterNeighborhood: enterNeighborhood,
+    onClearAnchor: returnToLandscape,
     onToggleSpotlight: toggleSpotlight,
     onRecencyChange: setRecency,
     clusters,
     isNeighborhood,
     showEdges,
     onToggleShowEdges: handleToggleShowEdges,
+    // Source-mode filter props
+    sourceTypesPresent,
+    sourceGraphAnchors,
+    onToggleSourceType: toggleSourceType,
+    onToggleConnType: toggleConnType,
+    onSetSourceAnchorFilter: setSourceAnchorFilter,
+    // Neighborhood edge-type filter
+    visibleEdgeTypes,
+    onToggleNeighborhoodEdgeType: toggleNeighborhoodEdgeType,
+    onClearAllFilters: clearAllFilters,
+    // Entity browser state (controls rendered inline in toolbar)
+    entityBrowser,
   }
 
-  // Loading state
-  if (loading) {
-    return (
-      <div className="flex flex-col h-full" style={{ background: 'var(--color-bg-content)' }}>
-        <ExploreToolbar {...toolbarProps} clusters={[]} />
-        <div className="flex-1 flex items-center justify-center">
-          <LoadingSkeleton />
-        </div>
-      </div>
-    )
-  }
-
-  // Error state
-  if (error) {
-    return (
-      <div className="flex flex-col h-full" style={{ background: 'var(--color-bg-content)' }}>
-        <ExploreToolbar {...toolbarProps} clusters={[]} />
-        <div className="flex-1 flex items-center justify-center">
-          <ErrorBanner message={error.message} onRetry={refetch} />
-        </div>
-      </div>
-    )
-  }
-
-  // Empty state — no anchors (entities mode only; sources can still render)
-  if (clusters.length === 0 && viewMode === 'entities') {
-    return (
-      <div className="flex flex-col h-full" style={{ background: 'var(--color-bg-content)' }}>
-        <ExploreToolbar {...toolbarProps} clusters={[]} />
-        <div className="flex-1 flex items-center justify-center">
-          <EmptyState />
-        </div>
-      </div>
-    )
-  }
+  // Determine effective clusters for toolbar (empty when loading/errored)
+  const toolbarClusters = loading || error ? [] : clusters
 
   return (
     <div className="flex flex-col h-full" style={{ background: 'var(--color-bg-content)' }}>
-      <ExploreToolbar {...toolbarProps} />
+      {/* Page title */}
+      <div style={{ padding: '20px 24px 0', flexShrink: 0 }}>
+        <h1
+          className="font-display font-extrabold text-text-primary"
+          style={{ fontSize: 26, letterSpacing: '-0.02em', margin: 0 }}
+        >
+          Explore
+        </h1>
+      </div>
+
+      <ExploreToolbar {...toolbarProps} clusters={toolbarClusters} />
+
+      {loading ? (
+        <div className="flex-1 flex items-center justify-center">
+          <LoadingSkeleton />
+        </div>
+      ) : error ? (
+        <div className="flex-1 flex items-center justify-center">
+          <ErrorBanner message={error.message} onRetry={refetch} />
+        </div>
+      ) : clusters.length === 0 && viewMode === 'anchors' ? (
+        <div className="flex-1 flex items-center justify-center">
+          <EmptyState />
+        </div>
+      ) : viewMode === 'entity-browser' ? (
+        <div className="flex-1 overflow-hidden">
+          <EntityBrowserTab browser={entityBrowser} />
+        </div>
+      ) : (
 
       <div
         ref={containerRef}
@@ -209,26 +254,29 @@ export function ExploreView() {
           }}
         >
           {/* Landscape (cluster bubbles) */}
-          {viewMode === 'entities' && !isNeighborhood && (
+          {viewMode === 'anchors' && !isNeighborhood && (
             <LandscapeView
               clusters={clusters}
               stats={stats}
               unclustered={unclustered}
               isClusterVisible={isClusterVisible}
               onClusterClick={handleClusterClick}
+              onZoomTransition={handleZoomTransition}
             />
           )}
 
           {/* Neighborhood (entity nodes within a cluster) */}
-          {viewMode === 'entities' && isNeighborhood && activeCluster && (
+          {viewMode === 'anchors' && isNeighborhood && activeCluster && (
             <NeighborhoodView
               cluster={activeCluster}
               allClusters={clusters}
               filters={filters}
               showEdges={showEdges}
+              visibleEdgeTypes={visibleEdgeTypes}
               selectedEntityId={selectedEntityId}
               onSelectEntity={handleSelectEntity}
               onBack={returnToLandscape}
+              onAutoBack={returnToLandscape}
               onEntitiesLoaded={handleEntitiesLoaded}
               onEdgesLoaded={handleEdgesLoaded}
             />
@@ -292,20 +340,22 @@ export function ExploreView() {
             viewMode={viewMode}
             zoomLevel={zoomLevel}
             activeCluster={activeCluster}
-            clusters={clusters}
             neighborhoodEntities={neighborhoodEntities}
             neighborhoodEdges={neighborhoodEdges}
             allSources={allSources}
             sourceEdges={sourceEdges}
+            sourceGraphAnchors={sourceGraphAnchors}
             selectedEntityId={selectedEntityId}
             selectedSourceId={selectedSourceId}
             onSelectEntity={handleSelectEntity}
             onSelectSource={handleSelectSource}
-            onClusterClick={handleClusterClick}
             onBack={returnToLandscape}
+            filters={filters}
+            onClearSpotlight={() => toggleSpotlight(null)}
           />
         </div>
       </div>
+      )}
     </div>
   )
 }

@@ -1,0 +1,658 @@
+import { supabase } from './supabase'
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+export interface SourceSettings {
+  mode: string
+  emphasis: string
+  linkedAnchorIds: string[]
+  customInstructions?: string
+}
+
+export const DEFAULT_SOURCE_SETTINGS: SourceSettings = {
+  mode: 'comprehensive',
+  emphasis: 'standard',
+  linkedAnchorIds: [],
+  customInstructions: '',
+}
+
+export interface AutomationSource {
+  id: string
+  category: 'youtube-channel' | 'youtube-playlist' | 'meeting'
+  name: string
+  handle?: string
+  channel?: string
+  description?: string
+  status: 'active' | 'paused' | 'connected' | 'disconnected' | 'error'
+  videosIngested?: number
+  meetingsIngested?: number
+  lastScan?: string
+  lastSync?: string
+  mode: string
+  emphasis: string
+  linkedAnchors: string[]
+  customInstructions?: string
+  queue: {
+    pending: number
+    processing: number
+    complete: number
+    failed: number
+  }
+}
+
+export interface IngestedItem {
+  id: string
+  title: string
+  ingestedAt: string
+  nodes?: number
+  edges?: number
+}
+
+export interface QueueItemDisplay {
+  id: string
+  title: string
+  sourceId: string
+  status: 'pending' | 'processing' | 'complete' | 'failed'
+  step: 'queued' | 'fetching' | 'extracting' | 'connecting' | 'complete'
+  time: string
+  error?: string
+  nodes?: number
+  edges?: number
+}
+
+export interface QueueSummary {
+  pending: number
+  processing: number
+  failed: number
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function toRelativeTime(isoString: string | null | undefined): string {
+  if (!isoString) return 'Never'
+  const diff = Date.now() - new Date(isoString).getTime()
+  const minutes = Math.floor(diff / 60000)
+  if (minutes < 1) return 'Just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}d ago`
+  const weeks = Math.floor(days / 7)
+  return `${weeks}w ago`
+}
+
+type RawQueueRow = { channel_id: string | null; playlist_id: string | null; status: string }
+
+function buildQueueCounts(rows: RawQueueRow[], id: string, field: 'channel_id' | 'playlist_id') {
+  const relevant = rows.filter(r => r[field] === id)
+  return {
+    pending: relevant.filter(r => r.status === 'pending').length,
+    processing: relevant.filter(r => r.status === 'fetching_transcript' || r.status === 'extracting').length,
+    complete: relevant.filter(r => r.status === 'completed').length,
+    failed: relevant.filter(r => r.status === 'failed').length,
+  }
+}
+
+// ─── Fetch All Sources ────────────────────────────────────────────────────────
+
+export async function fetchAutomationSources(): Promise<AutomationSource[]> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+
+  const [channelsRes, playlistsRes, queueRes, meetingsRes] = await Promise.all([
+    supabase
+      .from('youtube_channels')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('channel_name', { ascending: true }),
+    supabase
+      .from('youtube_playlists')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('youtube_ingestion_queue')
+      .select('channel_id, playlist_id, status')
+      .eq('user_id', user.id),
+    supabase
+      .from('knowledge_sources')
+      .select('id, title, created_at')
+      .eq('source_type', 'Meeting')
+      .limit(100),
+  ])
+
+  const queueRows: RawQueueRow[] = (queueRes.data ?? []) as RawQueueRow[]
+  const sources: AutomationSource[] = []
+
+  // YouTube channels
+  for (const ch of (channelsRes.data ?? []) as Record<string, unknown>[]) {
+    const channelId = ch.id as string
+    sources.push({
+      id: channelId,
+      category: 'youtube-channel',
+      name: (ch.channel_name as string) || 'Unnamed Channel',
+      handle: (ch.channel_url as string)?.includes('@')
+        ? '@' + ((ch.channel_url as string).split('@')[1] ?? '').split('/')[0]
+        : undefined,
+      description: (ch.description as string) || undefined,
+      status: (ch.is_active as boolean) ? 'active' : 'paused',
+      videosIngested: (ch.total_videos_ingested as number) ?? 0,
+      lastScan: toRelativeTime(ch.last_checked_at as string | null),
+      mode: (ch.extraction_mode as string) || 'comprehensive',
+      emphasis: (ch.anchor_emphasis as string) || 'standard',
+      linkedAnchors: (ch.linked_anchor_ids as string[]) || [],
+      customInstructions: (ch.custom_instructions as string) || undefined,
+      queue: buildQueueCounts(queueRows, channelId, 'channel_id'),
+    })
+  }
+
+  // YouTube playlists
+  for (const pl of (playlistsRes.data ?? []) as Record<string, unknown>[]) {
+    const plStatus = (pl.status as string) === 'active' || (pl.is_active as boolean) ? 'active' : 'paused'
+    sources.push({
+      id: pl.id as string,
+      category: 'youtube-playlist',
+      name: (pl.playlist_name as string) || 'Unnamed Playlist',
+      channel: (pl.channel_name as string) || undefined,
+      description: (pl.description as string) || undefined,
+      status: plStatus as AutomationSource['status'],
+      videosIngested: (pl.known_video_count as number) ?? 0,
+      lastScan: toRelativeTime(pl.updated_at as string | null),
+      mode: (pl.extraction_mode as string) || 'comprehensive',
+      emphasis: (pl.anchor_emphasis as string) || 'standard',
+      linkedAnchors: (pl.linked_anchor_ids as string[]) || [],
+      customInstructions: (pl.custom_instructions as string) || undefined,
+      queue: buildQueueCounts(queueRows, pl.id as string, 'playlist_id'),
+    })
+  }
+
+  // Meeting integration (synthetic)
+  const meetingCount = (meetingsRes.data ?? []).length
+  if (meetingCount > 0) {
+    sources.push({
+      id: 'meeting-integration',
+      category: 'meeting',
+      name: 'Meeting Transcripts',
+      description: 'Auto-captured meeting transcripts via connected services',
+      status: 'connected',
+      meetingsIngested: meetingCount,
+      lastSync: toRelativeTime((meetingsRes.data?.[0] as Record<string, unknown> | undefined)?.created_at as string | null),
+      mode: 'comprehensive',
+      emphasis: 'standard',
+      linkedAnchors: [],
+      queue: { pending: 0, processing: 0, complete: 0, failed: 0 },
+    })
+  }
+
+  return sources
+}
+
+// ─── Fetch Queue for Source ───────────────────────────────────────────────────
+
+export async function fetchSourceQueue(
+  sourceId: string,
+  category: AutomationSource['category'] = 'youtube-channel'
+): Promise<QueueItemDisplay[]> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+
+  let baseQuery = supabase
+    .from('youtube_ingestion_queue')
+    .select('*')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false })
+    .limit(20)
+
+  if (category === 'youtube-playlist') {
+    baseQuery = baseQuery.eq('playlist_id', sourceId)
+  } else {
+    baseQuery = baseQuery.eq('channel_id', sourceId)
+  }
+
+  const { data, error } = await baseQuery
+
+  if (error) {
+    console.warn('[automationSources] fetchSourceQueue error:', error)
+    return []
+  }
+
+  return ((data ?? []) as Record<string, unknown>[]).map(item => {
+    const rawStatus = item.status as string
+    let displayStatus: QueueItemDisplay['status'] = 'pending'
+    let step: QueueItemDisplay['step'] = 'queued'
+
+    if (rawStatus === 'completed') {
+      displayStatus = 'complete'
+      step = 'complete'
+    } else if (rawStatus === 'failed') {
+      displayStatus = 'failed'
+      step = 'fetching'
+    } else if (rawStatus === 'extracting') {
+      displayStatus = 'processing'
+      const startedAt = item.started_at ? new Date(item.started_at as string).getTime() : 0
+      step = startedAt && Date.now() - startedAt > 30000 ? 'connecting' : 'extracting'
+    } else if (rawStatus === 'fetching_transcript') {
+      displayStatus = 'processing'
+      step = 'fetching'
+    } else {
+      displayStatus = 'pending'
+      step = 'queued'
+    }
+
+    return {
+      id: item.id as string,
+      title: (item.video_title as string) || 'Untitled Video',
+      sourceId,
+      status: displayStatus,
+      step,
+      time: toRelativeTime(item.created_at as string),
+      error: (item.error_message as string) || undefined,
+      nodes: (item.nodes_created as number) || undefined,
+      edges: (item.edges_created as number) || undefined,
+    }
+  })
+}
+
+// ─── Queue Summary ────────────────────────────────────────────────────────────
+
+export async function fetchQueueSummary(): Promise<QueueSummary> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { pending: 0, processing: 0, failed: 0 }
+
+  const { data } = await supabase
+    .from('youtube_ingestion_queue')
+    .select('status')
+    .eq('user_id', user.id)
+    .in('status', ['pending', 'fetching_transcript', 'extracting', 'failed'])
+
+  const rows = (data ?? []) as { status: string }[]
+  return {
+    pending: rows.filter(r => r.status === 'pending').length,
+    processing: rows.filter(r => r.status === 'fetching_transcript' || r.status === 'extracting').length,
+    failed: rows.filter(r => r.status === 'failed').length,
+  }
+}
+
+// ─── Fetch Ingested Content ───────────────────────────────────────────────────
+
+// Calls YouTube Data API v3 from the browser with the user's own API key.
+async function fetchYTPlaylistVideoIds(ytPlaylistId: string, apiKey: string): Promise<string[]> {
+  const videoIds: string[] = []
+  let pageToken: string | undefined
+
+  for (let page = 0; page < 4; page++) {
+    const params = new URLSearchParams({
+      part: 'contentDetails',
+      playlistId: ytPlaylistId,
+      maxResults: '50',
+      key: apiKey,
+    })
+    if (pageToken) params.set('pageToken', pageToken)
+
+    try {
+      const res = await fetch(
+        `https://www.googleapis.com/youtube/v3/playlistItems?${params}`,
+        { signal: AbortSignal.timeout(10000) }
+      )
+      if (!res.ok) break
+
+      const data = await res.json() as {
+        items?: Array<{ contentDetails?: { videoId?: string } }>
+        nextPageToken?: string
+      }
+
+      for (const item of data.items ?? []) {
+        const videoId = item.contentDetails?.videoId
+        if (videoId) videoIds.push(videoId)
+      }
+
+      pageToken = data.nextPageToken
+      if (!pageToken) break
+    } catch {
+      break
+    }
+  }
+
+  return videoIds
+}
+
+function mapQueueRows(rows: Record<string, unknown>[]): IngestedItem[] {
+  return rows.map(item => ({
+    id: item.id as string,
+    title: (item.video_title as string) || 'Untitled Video',
+    ingestedAt: toRelativeTime(item.created_at as string),
+    nodes: (item.nodes_created as number) || undefined,
+    edges: (item.edges_created as number) || undefined,
+  }))
+}
+
+export async function fetchIngestedContent(
+  sourceId: string,
+  category: AutomationSource['category']
+): Promise<IngestedItem[]> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return []
+
+  // ── Meetings ────────────────────────────────────────────────────────────────
+  if (category === 'meeting') {
+    const { data } = await supabase
+      .from('knowledge_sources')
+      .select('id, title, created_at')
+      .eq('user_id', user.id)
+      .eq('source_type', 'Meeting')
+      .order('created_at', { ascending: false })
+      .limit(50)
+    return ((data ?? []) as Record<string, unknown>[]).map(s => ({
+      id: s.id as string,
+      title: (s.title as string) || 'Untitled Meeting',
+      ingestedAt: toRelativeTime(s.created_at as string),
+    }))
+  }
+
+  // ── YouTube channels ─────────────────────────────────────────────────────
+  // Queue items carry channel_id = the Supabase UUID of the youtube_channels row.
+  if (category === 'youtube-channel') {
+    const { data } = await supabase
+      .from('youtube_ingestion_queue')
+      .select('id, video_title, created_at, nodes_created, edges_created')
+      .eq('user_id', user.id)
+      .eq('channel_id', sourceId)
+      .eq('status', 'completed')
+      .order('created_at', { ascending: false })
+      .limit(50)
+    return mapQueueRows((data ?? []) as Record<string, unknown>[])
+  }
+
+  // ── YouTube playlists ────────────────────────────────────────────────────
+  // Strategy:
+  //   Tier 1 – Client-side YouTube API via VITE_YOUTUBE_API_KEY env var.
+  //            Works in all environments (local Vite dev, production).
+  //            Also backfills playlist_id on historical queue rows.
+  //   Tier 2 – Server-side Vercel endpoint (YOUTUBE_API_KEY server env var).
+  //            Fallback for when no client-side key is configured.
+  //   Tier 3 – playlist_id column only (post-migration rows, no API needed).
+
+  // Get the YouTube playlist ID from DB
+  const plRes = await supabase
+    .from('youtube_playlists')
+    .select('playlist_id')
+    .eq('id', sourceId)
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  const ytPlaylistId = (plRes.data as { playlist_id: string } | null)?.playlist_id
+
+  // Helper: backfill playlist_id on existing rows then return ingested list
+  const backfillAndFetch = async (videoIds: string[]): Promise<IngestedItem[]> => {
+    if (videoIds.length === 0) return []
+    await supabase
+      .from('youtube_ingestion_queue')
+      .update({ playlist_id: sourceId })
+      .eq('user_id', user.id)
+      .in('video_id', videoIds)
+      .is('playlist_id', null)
+    const { data } = await supabase
+      .from('youtube_ingestion_queue')
+      .select('id, video_title, created_at, nodes_created, edges_created')
+      .eq('user_id', user.id)
+      .in('video_id', videoIds)
+      .eq('status', 'completed')
+      .order('created_at', { ascending: false })
+      .limit(50)
+    return mapQueueRows((data ?? []) as Record<string, unknown>[])
+  }
+
+  // Tier 1: client-side YouTube API using VITE_YOUTUBE_API_KEY
+  const viteApiKey = (import.meta.env.VITE_YOUTUBE_API_KEY as string | undefined) ?? null
+  if (ytPlaylistId && viteApiKey) {
+    const videoIds = await fetchYTPlaylistVideoIds(ytPlaylistId, viteApiKey)
+    if (videoIds.length > 0) {
+      return backfillAndFetch(videoIds)
+    }
+  }
+
+  // Tier 2: server-side endpoint (Vercel deployment / vercel dev)
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    const authToken = session?.access_token
+    if (authToken) {
+      const res = await fetch('/api/youtube/playlist-ingested', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ playlist_uuid: sourceId }),
+      })
+      if (res.ok) {
+        const json = await res.json() as { items?: Array<{ id: string; title: string; ingestedAt: string; nodes?: number; edges?: number }> }
+        return (json.items ?? []).map(item => ({
+          id: item.id,
+          title: item.title,
+          ingestedAt: toRelativeTime(item.ingestedAt),
+          nodes: item.nodes,
+          edges: item.edges,
+        }))
+      }
+    }
+  } catch { /* not available in local Vite dev — fall through */ }
+
+  // Tier 3: playlist_id column only (catches post-migration rows, no API needed)
+  const { data: newRows } = await supabase
+    .from('youtube_ingestion_queue')
+    .select('id, video_title, created_at, nodes_created, edges_created')
+    .eq('user_id', user.id)
+    .eq('playlist_id', sourceId)
+    .eq('status', 'completed')
+    .order('created_at', { ascending: false })
+    .limit(50)
+  return mapQueueRows((newRows ?? []) as Record<string, unknown>[])
+}
+
+// ─── Update Source Settings ───────────────────────────────────────────────────
+
+export async function updateSourceSettings(
+  sourceId: string,
+  category: AutomationSource['category'],
+  settings: SourceSettings
+): Promise<void> {
+  const baseUpdate: Record<string, unknown> = {
+    extraction_mode: settings.mode,
+    anchor_emphasis: settings.emphasis,
+    linked_anchor_ids: settings.linkedAnchorIds,
+    updated_at: new Date().toISOString(),
+  }
+
+  if (category === 'youtube-channel') {
+    const { error } = await supabase
+      .from('youtube_channels')
+      .update(baseUpdate)
+      .eq('id', sourceId)
+    if (error) throw new Error(error.message)
+  } else if (category === 'youtube-playlist') {
+    const { error } = await supabase
+      .from('youtube_playlists')
+      .update(baseUpdate)
+      .eq('id', sourceId)
+    if (error) throw new Error(error.message)
+  }
+  // meeting integration: no persistent record to update
+}
+
+// ─── Add YouTube Channel ──────────────────────────────────────────────────────
+
+export async function addYouTubeChannel(
+  channelUrl: string,
+  settings: SourceSettings = DEFAULT_SOURCE_SETTINGS
+): Promise<AutomationSource> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+
+  let channelName = channelUrl
+  const handleMatch = channelUrl.match(/@([\w.-]+)/)
+  if (handleMatch) {
+    channelName = '@' + handleMatch[1]
+  }
+
+  const isValidUrl = channelUrl.includes('youtube.com/') || channelUrl.includes('youtu.be/')
+  if (!isValidUrl) throw new Error('Invalid YouTube channel URL')
+
+  const { data, error } = await supabase
+    .from('youtube_channels')
+    .insert({
+      user_id: user.id,
+      channel_id: channelUrl,
+      channel_name: channelName,
+      channel_url: channelUrl,
+      auto_ingest: true,
+      extraction_mode: settings.mode,
+      anchor_emphasis: settings.emphasis,
+      linked_anchor_ids: settings.linkedAnchorIds,
+      is_active: true,
+      total_videos_ingested: 0,
+      min_video_duration: 0,
+    })
+    .select()
+    .single()
+
+  if (error) {
+    if (error.code === '23505') throw new Error('This channel is already connected.')
+    throw new Error(error.message)
+  }
+
+  const ch = data as Record<string, unknown>
+  return {
+    id: ch.id as string,
+    category: 'youtube-channel',
+    name: ch.channel_name as string,
+    handle: handleMatch ? '@' + handleMatch[1] : undefined,
+    status: 'active',
+    videosIngested: 0,
+    lastScan: 'Never',
+    mode: settings.mode,
+    emphasis: settings.emphasis,
+    linkedAnchors: settings.linkedAnchorIds,
+    customInstructions: settings.customInstructions,
+    queue: { pending: 0, processing: 0, complete: 0, failed: 0 },
+  }
+}
+
+// ─── Add YouTube Playlist ─────────────────────────────────────────────────────
+
+export async function addYouTubePlaylist(
+  playlistUrl: string,
+  settings: SourceSettings = DEFAULT_SOURCE_SETTINGS
+): Promise<AutomationSource> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+
+  const listMatch = playlistUrl.match(/[?&]list=([\w-]+)/)
+  const playlistId = listMatch?.[1]
+  if (!playlistId) throw new Error('Invalid YouTube playlist URL. Expected format: youtube.com/playlist?list=...')
+  const synapseCode = 'SYN-' + Math.random().toString(36).substring(2, 6).toUpperCase()
+
+  const { data, error } = await supabase
+    .from('youtube_playlists')
+    .insert({
+      user_id: user.id,
+      playlist_id: playlistId,
+      playlist_name: `Playlist ${playlistId.substring(0, 8)}`,
+      playlist_url: playlistUrl,
+      synapse_code: synapseCode,
+      status: 'active',
+      is_active: true,
+      extraction_mode: settings.mode,
+      anchor_emphasis: settings.emphasis,
+      linked_anchor_ids: settings.linkedAnchorIds,
+      known_video_count: 0,
+    })
+    .select()
+    .single()
+
+  if (error) {
+    if (error.code === '23505') throw new Error('This playlist is already connected.')
+    throw new Error(error.message)
+  }
+
+  const pl = data as Record<string, unknown>
+  return {
+    id: pl.id as string,
+    category: 'youtube-playlist',
+    name: pl.playlist_name as string,
+    status: 'active',
+    videosIngested: 0,
+    lastScan: 'Never',
+    mode: settings.mode,
+    emphasis: settings.emphasis,
+    linkedAnchors: settings.linkedAnchorIds,
+    customInstructions: settings.customInstructions,
+    queue: { pending: 0, processing: 0, complete: 0, failed: 0 },
+  }
+}
+
+// ─── Update Source Status ─────────────────────────────────────────────────────
+
+export async function updateSourceStatus(
+  sourceId: string,
+  category: AutomationSource['category'],
+  status: 'active' | 'paused'
+): Promise<void> {
+  const isActive = status === 'active'
+
+  if (category === 'youtube-channel') {
+    const { error } = await supabase
+      .from('youtube_channels')
+      .update({ is_active: isActive, updated_at: new Date().toISOString() })
+      .eq('id', sourceId)
+    if (error) throw new Error(error.message)
+  } else if (category === 'youtube-playlist') {
+    const { error } = await supabase
+      .from('youtube_playlists')
+      .update({ is_active: isActive, status: isActive ? 'active' : 'paused', updated_at: new Date().toISOString() })
+      .eq('id', sourceId)
+    if (error) throw new Error(error.message)
+  }
+}
+
+// ─── Disconnect Source ────────────────────────────────────────────────────────
+
+export async function disconnectSource(
+  sourceId: string,
+  category: AutomationSource['category']
+): Promise<void> {
+  if (category === 'youtube-channel') {
+    const { error } = await supabase
+      .from('youtube_channels')
+      .update({ is_active: false, auto_ingest: false, updated_at: new Date().toISOString() })
+      .eq('id', sourceId)
+    if (error) throw new Error(error.message)
+  } else if (category === 'youtube-playlist') {
+    const { error } = await supabase
+      .from('youtube_playlists')
+      .update({ is_active: false, status: 'paused', updated_at: new Date().toISOString() })
+      .eq('id', sourceId)
+    if (error) throw new Error(error.message)
+  }
+}
+
+// ─── Trigger Manual Scan ──────────────────────────────────────────────────────
+
+export async function triggerManualScan(
+  sourceId: string,
+  category: AutomationSource['category']
+): Promise<void> {
+  if (category === 'youtube-channel') {
+    const { error } = await supabase
+      .from('youtube_channels')
+      .update({ last_checked_at: null, updated_at: new Date().toISOString() })
+      .eq('id', sourceId)
+    if (error) throw new Error(error.message)
+  } else if (category === 'youtube-playlist') {
+    const { error } = await supabase
+      .from('youtube_playlists')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', sourceId)
+    if (error) throw new Error(error.message)
+  }
+}

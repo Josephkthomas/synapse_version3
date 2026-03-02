@@ -47,7 +47,7 @@ export function SourceDetailPanel({
       const otherId = e.fromSourceId === source.id ? e.toSourceId : e.fromSourceId
       const other = allSources.find(s => s.id === otherId)
       if (!other) return null
-      return { source: other, sharedCount: e.sharedEntityCount }
+      return { source: other, sharedCount: e.totalWeight }
     })
     .filter((x): x is NonNullable<typeof x> => x !== null)
     .sort((a, b) => b.sharedCount - a.sharedCount)

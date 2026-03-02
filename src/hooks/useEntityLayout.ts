@@ -23,11 +23,15 @@ export function useEntityLayout(
 
     const maxConn = Math.max(...entities.map(e => e.connectionCount), 1)
 
-    // Initialize nodes
+    // Use a virtual canvas larger than the SVG — entities spread out and the camera scrolls in
+    const vw = Math.max(width * 1.6, 900)
+    const vh = Math.max(height * 1.6, 900)
+
+    // Initialize nodes spread across the virtual canvas
     const nodes = entities.map(e => ({
       id: e.id,
-      x: width / 2 + (Math.random() - 0.5) * width * 0.5,
-      y: height / 2 + (Math.random() - 0.5) * height * 0.5,
+      x: vw / 2 + (Math.random() - 0.5) * vw * 0.85,
+      y: vh / 2 + (Math.random() - 0.5) * vh * 0.85,
       vx: 0,
       vy: 0,
       radius: 5 + Math.min(e.connectionCount / maxConn, 1) * 9,
@@ -39,16 +43,16 @@ export function useEntityLayout(
       .map(e => ({ source: nodeById.get(e.sourceNodeId), target: nodeById.get(e.targetNodeId) }))
       .filter(l => l.source && l.target) as { source: typeof nodes[number]; target: typeof nodes[number] }[]
 
-    // Run 200 ticks
-    for (let tick = 0; tick < 200; tick++) {
+    // Run 280 ticks
+    for (let tick = 0; tick < 280; tick++) {
       const damping = 0.85
 
-      // 1. Center gravity
+      // 1. Very weak center gravity — keeps graph loosely centered without compressing it
       for (const n of nodes) {
-        const dx = width / 2 - n.x
-        const dy = height / 2 - n.y
-        n.vx += dx * 0.003
-        n.vy += dy * 0.003
+        const dx = vw / 2 - n.x
+        const dy = vh / 2 - n.y
+        n.vx += dx * 0.0006
+        n.vy += dy * 0.0006
       }
 
       // 2. Node-node repulsion
@@ -59,9 +63,9 @@ export function useEntityLayout(
           const dx = b.x - a.x
           const dy = b.y - a.y
           const dist = Math.sqrt(dx * dx + dy * dy) || 1
-          const minDist = a.radius + b.radius + 12
+          const minDist = a.radius + b.radius + 30
           if (dist < minDist) {
-            const force = (minDist - dist) * 0.04
+            const force = (minDist - dist) * 0.08
             const fx = (dx / dist) * force
             const fy = (dy / dist) * force
             a.vx -= fx
@@ -70,8 +74,8 @@ export function useEntityLayout(
             b.vy += fy
           }
           // Longer range charge repulsion
-          if (dist < 120) {
-            const charge = 40 / (dist * dist)
+          if (dist < 200) {
+            const charge = 280 / (dist * dist)
             const fx = (dx / dist) * charge
             const fy = (dy / dist) * charge
             a.vx -= fx
@@ -87,7 +91,7 @@ export function useEntityLayout(
         const dx = link.target.x - link.source.x
         const dy = link.target.y - link.source.y
         const dist = Math.sqrt(dx * dx + dy * dy) || 1
-        const idealDist = 80
+        const idealDist = 160
         const force = (dist - idealDist) * 0.003
         const fx = (dx / dist) * force
         const fy = (dy / dist) * force
@@ -106,12 +110,22 @@ export function useEntityLayout(
       }
     }
 
-    // Boundary clamping
+    // Boundary clamping — use virtual canvas bounds with padding
     for (const n of nodes) {
-      const pad = 30
-      n.x = Math.max(pad, Math.min(width - pad, n.x))
-      n.y = Math.max(pad, Math.min(height - pad, n.y))
+      const pad = 50
+      n.x = Math.max(pad, Math.min(vw - pad, n.x))
+      n.y = Math.max(pad, Math.min(vh - pad, n.y))
     }
+
+    // Re-center the layout at the SVG center (width/2, height/2)
+    // so downstream code (boundaryRadius, boundary ghost circle) works correctly
+    let sumX = 0, sumY = 0
+    for (const n of nodes) { sumX += n.x; sumY += n.y }
+    const comX = sumX / nodes.length
+    const comY = sumY / nodes.length
+    const offsetX = width / 2 - comX
+    const offsetY = height / 2 - comY
+    for (const n of nodes) { n.x += offsetX; n.y += offsetY }
 
     const result = new Map<string, EntityPosition>()
     for (const n of nodes) {

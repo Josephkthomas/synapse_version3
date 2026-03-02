@@ -189,7 +189,8 @@ export function useExtraction(): UseExtractionReturn {
             const entity = reviewedEntities.find(
               e => e.label.toLowerCase() === n.label.toLowerCase()
             )
-            return `${n.label}: ${entity?.description || ''}`
+            // Include entity_type for richer semantic vectors (aligns with backend)
+            return `${entity?.entity_type ?? n.entity_type}: ${n.label} — ${entity?.description || ''}`
           })
 
           const embeddings = await generateEmbeddings(texts, 5, (completed, total) => {

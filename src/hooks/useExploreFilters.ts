@@ -1,20 +1,23 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import type { ExploreFilters, ExploreViewMode, ZoomLevel, ClusterData } from '../types/explore'
+import type { ExploreFilters, ExploreViewMode, ZoomLevel, ClusterData, SourceConnectionType } from '../types/explore'
 
 const DEFAULT_FILTERS: ExploreFilters = {
   searchQuery: '',
   activeAnchorId: null,
   spotlightEntityType: null,
   recency: 'all',
+  sourceTypes: new Set(),
+  connTypes: new Set(),
+  sourceAnchorFilter: null,
 }
 
 export function useExploreFilters() {
   const [searchParams, setSearchParams] = useSearchParams()
 
-  // View mode: entities | sources
+  // View mode: anchors | sources | entity-browser
   const [viewMode, setViewMode] = useState<ExploreViewMode>(
-    (searchParams.get('mode') as ExploreViewMode) || 'entities'
+    (searchParams.get('mode') as ExploreViewMode) || 'anchors'
   )
 
   // Zoom level
@@ -41,6 +44,11 @@ export function useExploreFilters() {
     activeAnchorId: searchParams.get('anchor') || null,
     spotlightEntityType: searchParams.get('spotlight') || null,
     recency: (searchParams.get('recency') as ExploreFilters['recency']) || 'all',
+    sourceTypes: new Set(searchParams.get('stypes')?.split(',').filter(Boolean) ?? []),
+    connTypes: new Set(
+      (searchParams.get('ctypes')?.split(',').filter(Boolean) ?? []) as SourceConnectionType[]
+    ),
+    sourceAnchorFilter: searchParams.get('sanchor') || null,
   })
 
   // Debounced search
@@ -56,7 +64,7 @@ export function useExploreFilters() {
   // Sync state to URL params
   useEffect(() => {
     const params = new URLSearchParams()
-    if (viewMode !== 'entities') params.set('mode', viewMode)
+    if (viewMode !== 'anchors') params.set('mode', viewMode)
     if (zoomLevel !== 'landscape') params.set('zoom', zoomLevel)
     if (activeClusterId) params.set('cluster', activeClusterId)
     if (selectedEntityId) params.set('node', selectedEntityId)
@@ -64,8 +72,11 @@ export function useExploreFilters() {
     if (filters.spotlightEntityType) params.set('spotlight', filters.spotlightEntityType)
     if (filters.recency !== 'all') params.set('recency', filters.recency)
     if (searchInput) params.set('q', searchInput)
+    if (filters.sourceTypes.size > 0) params.set('stypes', [...filters.sourceTypes].join(','))
+    if (filters.connTypes.size > 0) params.set('ctypes', [...filters.connTypes].join(','))
+    if (filters.sourceAnchorFilter) params.set('sanchor', filters.sourceAnchorFilter)
     setSearchParams(params, { replace: true })
-  }, [viewMode, zoomLevel, activeClusterId, selectedEntityId, filters.activeAnchorId, filters.spotlightEntityType, filters.recency, searchInput, setSearchParams])
+  }, [viewMode, zoomLevel, activeClusterId, selectedEntityId, filters.activeAnchorId, filters.spotlightEntityType, filters.recency, filters.sourceTypes, filters.connTypes, filters.sourceAnchorFilter, searchInput, setSearchParams])
 
   // Anchor toggle — click active anchor again to clear
   const toggleAnchor = useCallback((anchorId: string) => {
@@ -90,18 +101,44 @@ export function useExploreFilters() {
     setFilters(prev => ({ ...prev, recency }))
   }, [])
 
-  // Enter neighborhood (click cluster)
+  // Enter neighborhood (click cluster) — also sets the anchor filter to reflect context
   const enterNeighborhood = useCallback((clusterId: string) => {
     setActiveClusterId(clusterId)
     setZoomLevel('neighborhood')
     setSelectedEntityId(null)
+    setFilters(prev => ({ ...prev, activeAnchorId: clusterId }))
   }, [])
 
-  // Return to landscape
+  // Return to landscape — clears the auto-set anchor filter
   const returnToLandscape = useCallback(() => {
     setActiveClusterId(null)
     setZoomLevel('landscape')
     setSelectedEntityId(null)
+    setFilters(prev => ({ ...prev, activeAnchorId: null }))
+  }, [])
+
+  // Source-mode filter toggles
+  const toggleSourceType = useCallback((type: string) => {
+    setFilters(prev => {
+      const next = new Set(prev.sourceTypes)
+      if (next.has(type)) next.delete(type); else next.add(type)
+      return { ...prev, sourceTypes: next }
+    })
+  }, [])
+
+  const toggleConnType = useCallback((type: SourceConnectionType) => {
+    setFilters(prev => {
+      const next = new Set(prev.connTypes)
+      if (next.has(type)) next.delete(type); else next.add(type)
+      return { ...prev, connTypes: next }
+    })
+  }, [])
+
+  const setSourceAnchorFilter = useCallback((anchorId: string | null) => {
+    setFilters(prev => ({
+      ...prev,
+      sourceAnchorFilter: prev.sourceAnchorFilter === anchorId ? null : anchorId,
+    }))
   }, [])
 
   // Cluster visibility: determines if a cluster should be dimmed or bright
@@ -147,5 +184,8 @@ export function useExploreFilters() {
     toggleSpotlight,
     setRecency,
     isClusterVisible,
+    toggleSourceType,
+    toggleConnType,
+    setSourceAnchorFilter,
   }
 }

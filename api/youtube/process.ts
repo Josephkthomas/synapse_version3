@@ -10,7 +10,7 @@ const CRON_SECRET = process.env.CRON_SECRET;
 
 const getSupabase = () => createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-const APIFY_ACTOR_ID = 'pintostudio/youtube-transcript-scraper';
+const APIFY_ACTOR_ID = 'streamers~youtube-scraper';
 
 const MAX_ITEMS_PER_BATCH = 2;      // cron mode
 const MAX_ITEMS_PROCESS_ALL = 20;   // user-triggered mode
@@ -97,178 +97,6 @@ async function verifyUserAuth(
   return { userId: null, isCron: false };
 }
 
-// ─── TIER 1: youtube-caption-extractor ─────────────────────────────────────────
-
-async function fetchTranscriptTier1(videoId: string): Promise<string | null> {
-  try {
-    const { getSubtitles } = await import('youtube-caption-extractor');
-    const subtitles = await Promise.race([
-      getSubtitles({ videoID: videoId, lang: 'en' }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Tier 1 timeout')), 15000)
-      ),
-    ]);
-    if (!subtitles || subtitles.length === 0) return null;
-    return subtitles.map((s: { text: string }) => s.text).join(' ');
-  } catch (err) {
-    console.log(`[process] Tier 1 failed for ${videoId}:`, err);
-    return null;
-  }
-}
-
-// ─── TIER 2: YouTube Innertube API ─────────────────────────────────────────────
-
-function encodeInnertubeParams(videoId: string): string {
-  // Protobuf minimal encoding: field 1, wire type 2 (length-delimited string)
-  // Tag = (field_number << 3) | wire_type = (1 << 3) | 2 = 0x0A
-  const videoIdBytes = Buffer.from(videoId, 'utf8');
-  const buf = Buffer.alloc(2 + videoIdBytes.length);
-  buf.writeUInt8(0x0a, 0);              // tag
-  buf.writeUInt8(videoIdBytes.length, 1); // varint length
-  videoIdBytes.copy(buf, 2);
-  return buf.toString('base64');
-}
-
-async function fetchTranscriptTier2(videoId: string): Promise<string | null> {
-  try {
-    const params = encodeInnertubeParams(videoId);
-
-    const response = await Promise.race([
-      fetch('https://www.youtube.com/youtubei/v1/get_transcript', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          context: {
-            client: {
-              clientName: 'WEB',
-              clientVersion: '2.20231219.04.00',
-            },
-          },
-          params,
-        }),
-      }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Tier 2 timeout')), 15000)
-      ),
-    ]);
-
-    if (!response.ok) return null;
-    const data = await response.json() as Record<string, unknown>;
-
-    const actions = data?.actions as Array<Record<string, unknown>> | undefined;
-    const segments =
-      (actions?.[0] as Record<string, unknown> | undefined)?.updateEngagementPanelAction as Record<string, unknown> | undefined;
-    const content = (segments?.content as Record<string, unknown> | undefined)?.transcriptRenderer as Record<string, unknown> | undefined;
-    const body = ((content?.content as Record<string, unknown> | undefined)?.transcriptSearchPanelRenderer as Record<string, unknown> | undefined)?.body as Record<string, unknown> | undefined;
-    const segmentList = (body?.transcriptSegmentListRenderer as Record<string, unknown> | undefined)?.initialSegments as Array<Record<string, unknown>> | undefined;
-
-    if (!segmentList?.length) return null;
-
-    return segmentList
-      .map(seg => {
-        const renderer = seg?.transcriptSegmentRenderer as Record<string, unknown> | undefined;
-        const runs = (renderer?.snippet as Record<string, unknown> | undefined)?.runs as Array<{ text?: string }> | undefined;
-        return runs?.map(r => r?.text ?? '').join('') ?? '';
-      })
-      .filter(Boolean)
-      .join(' ');
-  } catch (err) {
-    console.log(`[process] Tier 2 failed for ${videoId}:`, err);
-    return null;
-  }
-}
-
-// ─── TIER 3: Apify ─────────────────────────────────────────────────────────────
-
-async function fetchTranscriptTier3(videoUrl: string): Promise<{
-  success: boolean;
-  transcript: string | null;
-  language: string | null;
-  error?: string;
-}> {
-  if (!APIFY_API_KEY) {
-    return { success: false, transcript: null, language: null, error: 'No Apify API key' };
-  }
-
-  try {
-    // Start the actor run
-    const startResponse = await fetch(
-      `https://api.apify.com/v2/acts/${APIFY_ACTOR_ID}/runs?token=${APIFY_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls: [videoUrl], outputFormat: 'singleStringOutput' }),
-        signal: AbortSignal.timeout(15000),
-      }
-    );
-
-    if (!startResponse.ok) {
-      return { success: false, transcript: null, language: null, error: `Apify start failed: ${startResponse.status}` };
-    }
-
-    const startData = await startResponse.json() as {
-      data?: { id?: string; defaultDatasetId?: string };
-    };
-    const runId = startData.data?.id;
-    const datasetId = startData.data?.defaultDatasetId;
-
-    if (!runId) {
-      return { success: false, transcript: null, language: null, error: 'No run ID from Apify' };
-    }
-
-    // Poll for completion (max 120s)
-    const pollStart = Date.now();
-    while (Date.now() - pollStart < 120_000) {
-      await new Promise(resolve => setTimeout(resolve, 5000));
-
-      const statusResponse = await fetch(
-        `https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_API_KEY}`,
-        { signal: AbortSignal.timeout(10000) }
-      );
-
-      if (!statusResponse.ok) continue;
-
-      const statusData = await statusResponse.json() as { data?: { status?: string } };
-      const status = statusData.data?.status;
-
-      if (status === 'SUCCEEDED') {
-        // Fetch results
-        const resultsResponse = await fetch(
-          `https://api.apify.com/v2/datasets/${datasetId}/items?token=${APIFY_API_KEY}`,
-          { signal: AbortSignal.timeout(10000) }
-        );
-
-        if (!resultsResponse.ok) {
-          return { success: false, transcript: null, language: null, error: 'Failed to fetch Apify results' };
-        }
-
-        const items = await resultsResponse.json() as Array<{
-          transcript?: string;
-          captions?: string;
-          language?: string;
-        }>;
-
-        const transcript = items[0]?.transcript ?? items[0]?.captions ?? null;
-        return {
-          success: !!transcript,
-          transcript,
-          language: items[0]?.language ?? 'en',
-        };
-      }
-
-      if (status === 'FAILED' || status === 'ABORTED' || status === 'TIMED-OUT') {
-        return { success: false, transcript: null, language: null, error: `Apify run ${status}` };
-      }
-    }
-
-    return { success: false, transcript: null, language: null, error: 'Apify polling timeout' };
-
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { success: false, transcript: null, language: null, error: msg };
-  }
-}
-
 // ─── TRANSCRIPT FORMATTING ─────────────────────────────────────────────────────
 
 function formatTranscriptText(text: string): string {
@@ -284,27 +112,91 @@ function formatTranscriptText(text: string): string {
   return paragraphs.length > 1 ? paragraphs.join('\n\n') : text;
 }
 
-// ─── TRANSCRIPT ORCHESTRATOR ───────────────────────────────────────────────────
+// ─── TRANSCRIPT FETCH (Apify) ──────────────────────────────────────────────────
 
 async function fetchTranscript(
-  videoId: string,
+  _videoId: string,
   videoUrl: string
-): Promise<{ transcript: string | null; language: string | null; tier: number }> {
-  // Tier 1
-  const t1 = await fetchTranscriptTier1(videoId);
-  if (t1) return { transcript: formatTranscriptText(t1), language: 'en', tier: 1 };
-
-  // Tier 2
-  const t2 = await fetchTranscriptTier2(videoId);
-  if (t2) return { transcript: formatTranscriptText(t2), language: 'en', tier: 2 };
-
-  // Tier 3
-  const t3 = await fetchTranscriptTier3(videoUrl);
-  if (t3.success && t3.transcript) {
-    return { transcript: formatTranscriptText(t3.transcript), language: t3.language ?? 'en', tier: 3 };
+): Promise<{ transcript: string | null; language: string | null }> {
+  if (!APIFY_API_KEY) {
+    return { transcript: null, language: null };
   }
 
-  return { transcript: null, language: null, tier: 0 };
+  try {
+    const startResponse = await fetch(
+      `https://api.apify.com/v2/acts/${APIFY_ACTOR_ID}/runs?token=${APIFY_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          startUrls: [{ url: videoUrl }],
+          maxResults: 1,
+          maxResultsShorts: 0,
+          maxResultStreams: 0,
+          downloadSubtitles: true,
+          subtitlesLanguage: 'en',
+          preferAutoGeneratedSubtitles: true,
+          subtitlesFormat: 'plaintext',
+        }),
+        signal: AbortSignal.timeout(15000),
+      }
+    );
+
+    if (!startResponse.ok) {
+      console.log(`[process] Apify start failed: ${startResponse.status}`);
+      return { transcript: null, language: null };
+    }
+
+    const startData = await startResponse.json() as {
+      data?: { id?: string; defaultDatasetId?: string };
+    };
+    const runId = startData.data?.id;
+    const datasetId = startData.data?.defaultDatasetId;
+
+    if (!runId) return { transcript: null, language: null };
+
+    const pollStart = Date.now();
+    while (Date.now() - pollStart < 120_000) {
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      const statusResponse = await fetch(
+        `https://api.apify.com/v2/actor-runs/${runId}?token=${APIFY_API_KEY}`,
+        { signal: AbortSignal.timeout(10000) }
+      );
+      if (!statusResponse.ok) continue;
+
+      const statusData = await statusResponse.json() as { data?: { status?: string } };
+      const status = statusData.data?.status;
+
+      if (status === 'SUCCEEDED') {
+        const resultsResponse = await fetch(
+          `https://api.apify.com/v2/datasets/${datasetId}/items?token=${APIFY_API_KEY}`,
+          { signal: AbortSignal.timeout(10000) }
+        );
+        if (!resultsResponse.ok) return { transcript: null, language: null };
+
+        const items = await resultsResponse.json() as Array<{
+          subtitles?: Array<{ plaintext?: string; language?: string }>;
+        }>;
+        const sub = items[0]?.subtitles?.[0];
+        const raw = sub?.plaintext?.replace(/\s+/g, ' ').trim() || null;
+        return {
+          transcript: raw ? formatTranscriptText(raw) : null,
+          language: sub?.language ?? 'en',
+        };
+      }
+
+      if (['FAILED', 'ABORTED', 'TIMED-OUT'].includes(status ?? '')) {
+        console.log(`[process] Apify run ended with status: ${status}`);
+        return { transcript: null, language: null };
+      }
+    }
+
+    return { transcript: null, language: null };
+  } catch (err) {
+    console.log('[process] Apify fetch error:', err);
+    return { transcript: null, language: null };
+  }
 }
 
 // ─── EXTRACTION PIPELINE ───────────────────────────────────────────────────────
@@ -450,12 +342,12 @@ async function extractEntities(
 
 async function generateEmbedding(text: string): Promise<number[]> {
   const response = await fetch(
-    `${GEMINI_BASE}/text-embedding-004:embedContent?key=${GEMINI_API_KEY}`,
+    `${GEMINI_BASE}/gemini-embedding-001:embedContent?key=${GEMINI_API_KEY}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'models/text-embedding-004',
+        model: 'models/gemini-embedding-001',
         content: { parts: [{ text }] },
       }),
       signal: AbortSignal.timeout(15000),
@@ -503,11 +395,11 @@ async function processQueueItem(
     // ── TRANSCRIPT ──────────────────────────────────────────────────────────────
     await step('fetching_transcript', { started_at: new Date().toISOString() });
 
-    const { transcript, language, tier } = await fetchTranscript(item.video_id, item.video_url);
-    console.log(`[process] Video ${item.video_id}: transcript tier ${tier}, length ${transcript?.length ?? 0}`);
+    const { transcript, language } = await fetchTranscript(item.video_id, item.video_url);
+    console.log(`[process] Video ${item.video_id}: transcript length ${transcript?.length ?? 0}`);
 
     if (!transcript) {
-      throw new Error('No captions available (all tiers failed)');
+      throw new Error('No captions available');
     }
 
     await step('extracting', {
@@ -529,7 +421,7 @@ async function processQueueItem(
           video_id: item.video_id,
           duration_seconds: item.duration_seconds,
           published_at: item.published_at,
-          transcript_tier: tier,
+          transcript_source: 'apify',
         },
       })
       .select('id')
@@ -623,23 +515,37 @@ async function processQueueItem(
       }
     }
 
-    // ── STEP 5: GENERATE EMBEDDINGS ─────────────────────────────────────────────
-    for (const [label, nodeId] of savedNodeMap) {
-      const entity = entities.find(e => e.label === label);
-      if (!entity) continue;
+    // ── STEP 5: GENERATE EMBEDDINGS (parallel, concurrency 5) ──────────────────
+    // nodeEmbeddings is passed to Step 8 so we don't need a second DB round-trip
+    const nodeEmbeddings = new Map<string, number[]>(); // nodeId → embedding vector
+    const embeddingTasks = [...savedNodeMap.entries()]
+      .map(([label, nodeId]) => {
+        const entity = entities.find(e => e.label === label);
+        return entity ? { label, nodeId, entity } : null;
+      })
+      .filter((t): t is { label: string; nodeId: string; entity: (typeof entities)[0] } => t !== null);
 
-      const embeddingText = `${entity.label}: ${entity.description ?? ''}`;
-      try {
-        const embedding = await generateEmbedding(embeddingText);
-        if (embedding.length > 0) {
-          await supabase
-            .from('knowledge_nodes')
-            .update({ embedding })
-            .eq('id', nodeId);
-        }
-      } catch (err) {
-        console.warn(`[process] Embedding failed for node ${label}:`, err);
-      }
+    const EMBEDDING_CONCURRENCY = 5;
+    for (let i = 0; i < embeddingTasks.length; i += EMBEDDING_CONCURRENCY) {
+      const batch = embeddingTasks.slice(i, i + EMBEDDING_CONCURRENCY);
+      await Promise.allSettled(
+        batch.map(async ({ label, nodeId, entity }) => {
+          // Include entity_type for richer semantic vector (aligns with frontend)
+          const embeddingText = `${entity.entity_type}: ${entity.label} — ${entity.description ?? ''}`;
+          try {
+            const embedding = await generateEmbedding(embeddingText);
+            if (embedding.length > 0) {
+              nodeEmbeddings.set(nodeId, embedding);
+              await supabase
+                .from('knowledge_nodes')
+                .update({ embedding })
+                .eq('id', nodeId);
+            }
+          } catch (err) {
+            console.warn(`[process] Embedding failed for node ${label}:`, err);
+          }
+        })
+      );
     }
 
     // ── STEP 6: SAVE EDGES ──────────────────────────────────────────────────────
@@ -685,37 +591,62 @@ async function processQueueItem(
       }
     }
 
-    // ── STEP 8: CROSS-CONNECTION DISCOVERY ─────────────────────────────────────
+    // ── STEP 8: CROSS-CONNECTION DISCOVERY (semantic search) ────────────────────
     if (savedNodeMap.size > 0) {
       try {
-        const newNodeIds = Array.from(savedNodeMap.values());
+        const newNodeIds = new Set(savedNodeMap.values());
 
-        // Fetch existing nodes from other sources to find cross-connections
-        const { data: existingNodes } = await supabase
-          .from('knowledge_nodes')
-          .select('id, label, entity_type, description')
-          .eq('user_id', item.user_id)
-          .neq('source_id', sourceId)
-          .not('id', 'in', `(${newNodeIds.join(',')})`)
-          .limit(50);
+        // Collect semantically similar existing nodes for each new node via RPC.
+        // Uses the embeddings we generated in Step 5 (no extra DB round-trip needed).
+        type SemanticCandidate = { id: string; label: string; entity_type: string; description: string | null };
+        const candidateMap = new Map<string, SemanticCandidate>(); // id → node (deduped)
 
-        if (existingNodes && existingNodes.length > 0) {
-          const crossPrompt = `Given these NEW entities from a YouTube video and EXISTING entities from other sources, identify meaningful cross-source relationships.
+        for (const [nodeId, embedding] of nodeEmbeddings) {
+          const { data: similar } = await supabase.rpc('match_knowledge_nodes', {
+            query_embedding: embedding,
+            match_threshold: 0.55,
+            match_count: 30,
+            p_user_id: item.user_id,
+          });
+          for (const s of similar ?? []) {
+            if (!newNodeIds.has(s.id)) {
+              candidateMap.set(s.id, s as SemanticCandidate);
+            }
+          }
+        }
 
-NEW entities:
-${entities.slice(0, 20).map(e => `- ${e.label} (${e.entity_type}): ${e.description ?? ''}`).join('\n')}
+        const existingNodes = [...candidateMap.values()].slice(0, 40);
 
-EXISTING entities:
-${existingNodes.slice(0, 30).map((e: { label: string; entity_type: string; description?: string }) => `- ${e.label} (${e.entity_type}): ${e.description ?? ''}`).join('\n')}
+        if (existingNodes.length > 0) {
+          const newEntityLines = entities.slice(0, 20)
+            .map(e => `- [${e.entity_type}] ${e.label}: ${e.description ?? ''}`)
+            .join('\n');
+          const existingEntityLines = existingNodes
+            .map((e) => `- [${e.entity_type}] ${e.label}: ${e.description ?? ''}`)
+            .join('\n');
+
+          const crossPrompt = `You are building a knowledge graph. Identify meaningful cross-source relationships between new and existing entities.
+
+NEW entities (just ingested from a YouTube video):
+${newEntityLines}
+
+EXISTING entities (already in the user's knowledge graph):
+${existingEntityLines}
+
+Rules:
+- Only return connections where a meaningful, non-trivial relationship exists.
+- Do NOT connect entities simply because they share a label or topic — the relationship must add knowledge.
+- Prefer directional types (leads_to, enables, supports, blocks) over generic types (relates_to).
+- Skip connections between entities that appear to be the same concept.
 
 Return ONLY valid JSON:
 {
   "relationships": [
-    { "source": "new entity label", "target": "existing entity label", "relation_type": "one of: relates_to|supports|contradicts|part_of|enables|leads_to", "evidence": "brief explanation" }
+    { "source": "new entity label", "target": "existing entity label", "relation_type": "one of: leads_to|supports|enables|blocks|contradicts|part_of|relates_to|associated_with", "evidence": "one sentence justification" }
   ]
 }
 
-Only include high-confidence relationships with clear evidence. Return empty array if none found.`;
+Return an empty array if no genuine cross-source connections exist.`;
 
           const crossResponse = await fetch(
             `${GEMINI_BASE}/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
@@ -743,12 +674,12 @@ Only include high-confidence relationships with clear evidence. Return empty arr
                 };
 
                 const existingNodeMap = new Map(
-                  (existingNodes as Array<{ id: string; label: string }>).map(n => [n.label, n.id])
+                  existingNodes.map(n => [n.label.toLowerCase(), n.id])
                 );
 
                 for (const rel of crossResult.relationships ?? []) {
-                  const sourceId2 = savedNodeMap.get(rel.source) ?? existingNodeMap.get(rel.source);
-                  const targetId = savedNodeMap.get(rel.target) ?? existingNodeMap.get(rel.target);
+                  const sourceId2 = savedNodeMap.get(rel.source) ?? existingNodeMap.get(rel.source?.toLowerCase());
+                  const targetId = savedNodeMap.get(rel.target) ?? existingNodeMap.get(rel.target?.toLowerCase());
 
                   if (sourceId2 && targetId && sourceId2 !== targetId) {
                     await supabase.from('knowledge_edges').insert({

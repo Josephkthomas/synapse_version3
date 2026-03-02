@@ -15,9 +15,11 @@ interface NeighborhoodViewProps {
   allClusters: ClusterData[]
   filters: ExploreFilters
   showEdges: boolean
+  visibleEdgeTypes: Set<string>
   selectedEntityId: string | null
   onSelectEntity: (entity: EntityNode | null) => void
   onBack: () => void
+  onAutoBack?: () => void
   onEntitiesLoaded?: (entities: EntityNode[]) => void
   onEdgesLoaded?: (edges: EntityEdge[]) => void
 }
@@ -25,6 +27,7 @@ interface NeighborhoodViewProps {
 const HUB_CONNECTION_THRESHOLD = 7
 const MIN_ZOOM = 0.2
 const MAX_ZOOM = 4.0
+const AUTO_BACK_ZOOM = 0.35
 
 interface Camera { zoom: number; panX: number; panY: number }
 
@@ -33,9 +36,11 @@ export function NeighborhoodView({
   allClusters,
   filters,
   showEdges,
+  visibleEdgeTypes,
   selectedEntityId,
   onSelectEntity,
   onBack,
+  onAutoBack,
   onEntitiesLoaded,
   onEdgesLoaded,
 }: NeighborhoodViewProps) {
@@ -55,15 +60,68 @@ export function NeighborhoodView({
   const [edges, setEdges] = useState<EntityEdge[]>([])
   const [loading, setLoading] = useState(true)
 
+  // Synthetic co-source edges — hub-and-spoke per source document (needed before layout)
+  const coSourceEdgesForLayout = useMemo((): EntityEdge[] => {
+    const bySource = new Map<string, EntityNode[]>()
+    for (const e of entities) {
+      if (!e.sourceId) continue
+      const group = bySource.get(e.sourceId) ?? []
+      group.push(e)
+      bySource.set(e.sourceId, group)
+    }
+    const result: EntityEdge[] = []
+    for (const [, group] of bySource) {
+      if (group.length < 2) continue
+      const sorted = [...group].sort((a, b) => b.connectionCount - a.connectionCount)
+      const hub = sorted[0]!
+      for (let i = 1; i < sorted.length; i++) {
+        result.push({ sourceNodeId: hub.id, targetNodeId: sorted[i]!.id, relationType: 'co-source', weight: 0.3 })
+      }
+    }
+    return result
+  }, [entities])
+
+  // Synthetic co-tag edges — hub-and-spoke per shared tag (skip tags shared by too many to avoid noise)
+  const coTagEdgesForLayout = useMemo((): EntityEdge[] => {
+    const byTag = new Map<string, EntityNode[]>()
+    for (const e of entities) {
+      for (const tag of e.tags) {
+        if (!byTag.has(tag)) byTag.set(tag, [])
+        byTag.get(tag)!.push(e)
+      }
+    }
+    const result: EntityEdge[] = []
+    for (const [, group] of byTag) {
+      if (group.length < 2 || group.length > 25) continue
+      const sorted = [...group].sort((a, b) => b.connectionCount - a.connectionCount)
+      const hub = sorted[0]!
+      for (let i = 1; i < sorted.length; i++) {
+        result.push({ sourceNodeId: hub.id, targetNodeId: sorted[i]!.id, relationType: 'co-tag', weight: 0.2 })
+      }
+    }
+    return result
+  }, [entities])
+
+  const allEdgesForLayout = useMemo(
+    () => [...edges, ...coSourceEdgesForLayout, ...coTagEdgesForLayout],
+    [edges, coSourceEdgesForLayout, coTagEdgesForLayout]
+  )
+
   // Draggable positions — live state so drag updates trigger re-render
-  const layoutPositions = useEntityLayout(entities, edges, size.width, size.height)
+  // Uses allEdgesForLayout (real + co-source) so co-source entities attract each other
+  const layoutPositions = useEntityLayout(entities, allEdgesForLayout, size.width, size.height)
   const [nodePositions, setNodePositions] = useState<Map<string, EntityPosition>>(new Map())
   useEffect(() => { setNodePositions(layoutPositions) }, [layoutPositions])
+
+  // Ref so drag handler never has stale allEdgesForLayout
+  const allEdgesForLayoutRef = useRef(allEdgesForLayout)
+  useEffect(() => { allEdgesForLayoutRef.current = allEdgesForLayout }, [allEdgesForLayout])
 
   // Drag & pan refs (no state to avoid re-renders on every frame)
   const dragNodeRef = useRef<{ id: string } | null>(null)
   const panStartRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null)
   const hasDraggedRef = useRef(false)
+  const hasAutoBackedRef = useRef(false)
 
   // Tooltip state
   const [tooltip, setTooltip] = useState<{ data: TooltipData; x: number; y: number } | null>(null)
@@ -115,6 +173,12 @@ export function NeighborhoodView({
     load()
     return () => { cancelled = true }
   }, [user, cluster.anchor.id, allClusters, onEntitiesLoaded, onEdgesLoaded])
+
+  // Anchor entity — the cluster's own anchor in the entities list
+  const anchorEntity = useMemo(
+    () => entities.find(e => e.isAnchor && e.clusters.includes(cluster.anchor.id)),
+    [entities, cluster.anchor.id]
+  )
 
   // Peripheral entities (belong to other clusters)
   const peripheralIds = useMemo(() => {
@@ -206,29 +270,63 @@ export function NeighborhoodView({
     setCamera({ zoom: 1, panX: 0, panY: 0 })
   }, [])
 
-  // Wheel zoom (non-passive to call preventDefault; ctrlKey = trackpad pinch)
+  // Stable ref for onAutoBack — avoids stale closure in wheel effect with [] deps
+  const onAutoBackRef = useRef(onAutoBack)
+  useEffect(() => { onAutoBackRef.current = onAutoBack }, [onAutoBack])
+
+  // Wheel zoom (non-passive; attached to containerRef which is always mounted)
   useEffect(() => {
-    const el = svgRef.current
+    const el = containerRef.current
     if (!el) return
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
-      const rect = el.getBoundingClientRect()
+      const svg = svgRef.current
+      if (!svg) return
+      const rect = svg.getBoundingClientRect()
       const sx = e.clientX - rect.left
       const sy = e.clientY - rect.top
-      setCamera(prev => {
-        const newZoom = e.ctrlKey
-          ? Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.zoom * (1 - e.deltaY * 0.01)))
-          : Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.zoom * (e.deltaY < 0 ? 1.1 : 0.9)))
-        return {
-          zoom: newZoom,
-          panX: sx - (sx - prev.panX) / prev.zoom * newZoom,
-          panY: sy - (sy - prev.panY) / prev.zoom * newZoom,
-        }
-      })
+
+      if (e.ctrlKey) {
+        // Trackpad pinch or Ctrl+scroll → zoom around cursor
+        setCamera(prev => {
+          const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.zoom * (1 - e.deltaY * 0.01)))
+          if (onAutoBackRef.current && newZoom <= AUTO_BACK_ZOOM && prev.zoom > AUTO_BACK_ZOOM && !hasAutoBackedRef.current) {
+            hasAutoBackedRef.current = true
+            setTimeout(() => onAutoBackRef.current?.(), 0)
+          }
+          return {
+            zoom: newZoom,
+            panX: sx - (sx - prev.panX) / prev.zoom * newZoom,
+            panY: sy - (sy - prev.panY) / prev.zoom * newZoom,
+          }
+        })
+      } else if (Math.abs(e.deltaX) > 2) {
+        // Trackpad two-finger horizontal swipe → pan
+        setCamera(prev => ({
+          ...prev,
+          panX: prev.panX - e.deltaX,
+          panY: prev.panY - e.deltaY,
+        }))
+      } else {
+        // Mouse scroll wheel → zoom around cursor
+        setCamera(prev => {
+          const factor = e.deltaY < 0 ? 1.12 : 0.9
+          const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.zoom * factor))
+          if (onAutoBackRef.current && newZoom <= AUTO_BACK_ZOOM && prev.zoom > AUTO_BACK_ZOOM && !hasAutoBackedRef.current) {
+            hasAutoBackedRef.current = true
+            setTimeout(() => onAutoBackRef.current?.(), 0)
+          }
+          return {
+            zoom: newZoom,
+            panX: sx - (sx - prev.panX) / prev.zoom * newZoom,
+            panY: sy - (sy - prev.panY) / prev.zoom * newZoom,
+          }
+        })
+      }
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
-  }, [size.width, size.height])
+  }, [])
 
   // Keyboard zoom: +/= to zoom in, -/_ to zoom out, 0 to reset
   useEffect(() => {
@@ -288,8 +386,21 @@ export function NeighborhoodView({
       setNodePositions(prev => {
         const old = prev.get(id)
         if (!old) return prev
+        const dx = wx - old.x
+        const dy = wy - old.y
         const next = new Map(prev)
         next.set(id, { ...old, x: wx, y: wy })
+        // Spring: pull connected nodes toward the dragged node
+        for (const edge of allEdgesForLayoutRef.current) {
+          if (edge.sourceNodeId !== id && edge.targetNodeId !== id) continue
+          const otherId = edge.sourceNodeId === id ? edge.targetNodeId : edge.sourceNodeId
+          const other = next.get(otherId)
+          if (!other) continue
+          const k = edge.relationType === 'co-source' ? 0.08
+                   : edge.relationType === 'co-tag'    ? 0.05
+                   : 0.15 // knowledge edge
+          next.set(otherId, { ...other, x: other.x + dx * k, y: other.y + dy * k })
+        }
         return next
       })
       hasDraggedRef.current = true
@@ -381,19 +492,66 @@ export function NeighborhoodView({
         >
           {/* Camera transform — wraps all world-space content */}
           <g transform={`translate(${camera.panX},${camera.panY}) scale(${camera.zoom})`}>
-            {/* 1. Cluster boundary ghost */}
+            {/* 1. Cluster boundary ghost (subtle ring, kept for spatial context) */}
             <circle
               cx={size.width / 2}
               cy={size.height / 2}
               r={boundaryRadius}
               fill="none"
-              stroke="rgba(0,0,0,0.04)"
-              strokeWidth={1}
-              strokeDasharray="8 6"
+              stroke="rgba(180,83,9,0.06)"
+              strokeWidth={1.5}
             />
 
-            {/* 2. Entity edges */}
-            {visibleEdges.map(edge => {
+            {/* 2a. Co-source background edges */}
+            {visibleEdgeTypes.has('source') && coSourceEdgesForLayout.map(edge => {
+              const sourcePos = nodePositions.get(edge.sourceNodeId)
+              const targetPos = nodePositions.get(edge.targetNodeId)
+              if (!sourcePos || !targetPos) return null
+              return (
+                <line
+                  key={`cs-${edge.sourceNodeId}-${edge.targetNodeId}`}
+                  x1={sourcePos.x}
+                  y1={sourcePos.y}
+                  x2={targetPos.x}
+                  y2={targetPos.y}
+                  stroke={(() => {
+                    if (connectedToSelected === null) return 'rgba(37,99,235,0.32)'
+                    const hit = edge.sourceNodeId === selectedEntityId || edge.targetNodeId === selectedEntityId
+                    return hit ? 'rgba(37,99,235,0.78)' : 'rgba(37,99,235,0.05)'
+                  })()}
+                  strokeWidth={connectedToSelected !== null && (edge.sourceNodeId === selectedEntityId || edge.targetNodeId === selectedEntityId) ? 2.5 : 1.5}
+                  strokeDasharray="7 4"
+                  style={{ transition: 'stroke 0.18s ease, stroke-width 0.18s ease' }}
+                />
+              )
+            })}
+
+            {/* 2b. Co-tag background edges */}
+            {visibleEdgeTypes.has('tag') && coTagEdgesForLayout.map(edge => {
+              const sourcePos = nodePositions.get(edge.sourceNodeId)
+              const targetPos = nodePositions.get(edge.targetNodeId)
+              if (!sourcePos || !targetPos) return null
+              return (
+                <line
+                  key={`ct-${edge.sourceNodeId}-${edge.targetNodeId}`}
+                  x1={sourcePos.x}
+                  y1={sourcePos.y}
+                  x2={targetPos.x}
+                  y2={targetPos.y}
+                  stroke={(() => {
+                    if (connectedToSelected === null) return 'rgba(124,58,237,0.30)'
+                    const hit = edge.sourceNodeId === selectedEntityId || edge.targetNodeId === selectedEntityId
+                    return hit ? 'rgba(124,58,237,0.75)' : 'rgba(124,58,237,0.04)'
+                  })()}
+                  strokeWidth={connectedToSelected !== null && (edge.sourceNodeId === selectedEntityId || edge.targetNodeId === selectedEntityId) ? 2.5 : 1.5}
+                  strokeDasharray="2 5"
+                  style={{ transition: 'stroke 0.18s ease, stroke-width 0.18s ease' }}
+                />
+              )
+            })}
+
+            {/* 2c. Knowledge edges */}
+            {visibleEdgeTypes.has('direct') && visibleEdges.map(edge => {
               const sourcePos = nodePositions.get(edge.sourceNodeId)
               const targetPos = nodePositions.get(edge.targetNodeId)
               if (!sourcePos || !targetPos) return null
@@ -470,11 +628,53 @@ export function NeighborhoodView({
                   dimmed={isDimmed}
                   isPeripheral={isPeripheral}
                   isHubLabel={isHub}
+                  showAllLabels={camera.zoom >= 1.5}
                   onHover={handleEntityHover}
                   onClick={handleEntityClick}
                 />
               )
             })}
+
+            {/* 4. Hub anchor node — always at center, on top of entities */}
+            <g
+              transform={`translate(${size.width / 2}, ${size.height / 2})`}
+              onClick={() => { if (anchorEntity) onSelectEntity(anchorEntity) }}
+              style={{ cursor: anchorEntity ? 'pointer' : 'default' }}
+            >
+              {/* Glow aura */}
+              <circle r={36} fill="rgba(180,83,9,0.05)" />
+              <circle r={28} fill="rgba(180,83,9,0.09)" />
+              {/* Gold border ring */}
+              <circle r={22} fill="none" stroke="rgba(180,83,9,0.75)" strokeWidth={2.5} />
+              {/* Parchment fill */}
+              <circle r={20} fill="rgb(235,222,205)" />
+              {/* ⚓ symbol */}
+              <text
+                y={2}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                style={{ fontSize: 14, fill: 'rgba(140,70,0,0.85)', pointerEvents: 'none', userSelect: 'none' }}
+              >
+                ⚓
+              </text>
+              {/* Anchor label below */}
+              <text
+                y={33}
+                textAnchor="middle"
+                style={{
+                  fontFamily: 'var(--font-display)',
+                  fontSize: 9,
+                  fontWeight: 700,
+                  fill: 'rgba(140,70,0,0.85)',
+                  pointerEvents: 'none',
+                  userSelect: 'none',
+                }}
+              >
+                {cluster.anchor.label.length > 20
+                  ? cluster.anchor.label.slice(0, 19) + '…'
+                  : cluster.anchor.label}
+              </text>
+            </g>
           </g>
         </svg>
       )}
@@ -606,21 +806,6 @@ export function NeighborhoodView({
             {label}
           </button>
         ))}
-      </div>
-
-      {/* Hint — bottom-left */}
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 20,
-          left: 16,
-          fontFamily: 'var(--font-body)',
-          fontSize: 10,
-          color: 'var(--color-text-placeholder)',
-          pointerEvents: 'none',
-        }}
-      >
-        Drag nodes · Scroll to zoom · Drag background to pan
       </div>
 
       {/* Tooltip */}

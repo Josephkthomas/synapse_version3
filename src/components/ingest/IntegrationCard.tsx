@@ -29,18 +29,22 @@ export function IntegrationCard({ config, onConnect }: IntegrationCardProps) {
         {/* Icon */}
         <div
           style={{
-            width: 24,
-            height: 24,
-            borderRadius: '50%',
+            width: 28,
+            height: 28,
+            borderRadius: 6,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: 12,
             flexShrink: 0,
             background: 'var(--color-bg-inset)',
+            overflow: 'hidden',
           }}
         >
-          {config.icon}
+          <img
+            src={config.icon}
+            alt={config.name}
+            style={{ width: 20, height: 20, objectFit: 'contain', borderRadius: 3 }}
+          />
         </div>
 
         <div style={{ flex: 1, minWidth: 0 }}>

@@ -1,6 +1,6 @@
 // src/types/explore.ts — Shared types for Explore page (PRDs 4A–4E)
 
-export type ExploreViewMode = 'entities' | 'sources'
+export type ExploreViewMode = 'anchors' | 'sources' | 'entity-browser'
 export type ZoomLevel = 'landscape' | 'neighborhood' | 'detail'
 
 export interface ClusterData {
@@ -47,6 +47,7 @@ export interface EntityNode {
   createdAt: string
   isBridge: boolean // belongs to 2+ clusters
   isUnclustered: boolean // belongs to 0 clusters
+  isAnchor: boolean // this node is itself an anchor
 }
 
 export interface SourceNode {
@@ -56,13 +57,29 @@ export interface SourceNode {
   entityIds: string[]
   entityCount: number
   createdAt: string
+  tags: string[]             // unique tags across all entities in this source
+  anchorIds: string[]        // anchor IDs this source's entities connect to
 }
+
+export type SourceConnectionType = 'entity' | 'tag' | 'anchor'
 
 export interface SourceEdge {
   fromSourceId: string
   toSourceId: string
-  sharedEntityCount: number
-  sharedEntityIds: string[]
+  totalWeight: number          // aggregate strength across all connection types
+  connections: {
+    type: SourceConnectionType
+    count: number              // e.g. # of cross-source edges, # of shared tags, # of common anchors
+    labels: string[]           // human-readable: tag names, anchor labels, etc.
+  }[]
+}
+
+/** Anchor node rendered inside the source graph */
+export interface SourceGraphAnchor {
+  id: string
+  label: string
+  entityType: string
+  connectedSourceIds: string[] // sources whose entities link to this anchor
 }
 
 export interface ExploreFilters {
@@ -70,6 +87,10 @@ export interface ExploreFilters {
   activeAnchorId: string | null
   spotlightEntityType: string | null
   recency: '7d' | '30d' | 'all'
+  // Source-mode filters
+  sourceTypes: Set<string>              // empty = show all
+  connTypes: Set<SourceConnectionType>  // empty = show all
+  sourceAnchorFilter: string | null     // anchor ID or null
 }
 
 export interface ContextBasketItem {
@@ -83,3 +104,25 @@ export type ExploreRightPanelContent =
   | { type: 'source'; data: SourceNode }
   | { type: 'cluster'; data: ClusterData }
   | null
+
+// ─── Entity Browser types ─────────────────────────────────────────────────────
+
+export interface EntityWithConnections {
+  id: string
+  label: string
+  entityType: string
+  description: string | null
+  confidence: number | null
+  sourceId: string | null
+  sourceName: string | null
+  sourceType: string | null
+  tags: string[]
+  createdAt: string
+  connectionCount: number
+  topConnections: Array<{
+    id: string
+    label: string
+    entityType: string
+    relationType: string
+  }>
+}

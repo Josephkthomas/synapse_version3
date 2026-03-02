@@ -15,7 +15,7 @@ const BASE_INTEGRATIONS: Omit<IntegrationConfig, 'status'>[] = [
   {
     id: 'circleback',
     name: 'Circleback',
-    icon: '🔵',
+    icon: '/logos/circleback.jpeg',
     description: 'Auto-capture meeting transcripts',
     comingSoon: false,
     setupInstructions: [
@@ -29,7 +29,7 @@ const BASE_INTEGRATIONS: Omit<IntegrationConfig, 'status'>[] = [
   {
     id: 'fireflies',
     name: 'Fireflies',
-    icon: '🟣',
+    icon: '/logos/fireflies.jpeg',
     description: 'AI meeting notes and transcripts',
     comingSoon: true,
     setupInstructions: [],
@@ -37,7 +37,7 @@ const BASE_INTEGRATIONS: Omit<IntegrationConfig, 'status'>[] = [
   {
     id: 'tldv',
     name: 'tl;dv',
-    icon: '🟢',
+    icon: '/logos/tldv.svg',
     description: 'Record and transcribe meetings',
     comingSoon: true,
     setupInstructions: [],
@@ -45,7 +45,7 @@ const BASE_INTEGRATIONS: Omit<IntegrationConfig, 'status'>[] = [
   {
     id: 'meetgeek',
     name: 'MeetGeek',
-    icon: '🟡',
+    icon: '/logos/meetgeek.jpeg',
     description: 'Meeting productivity assistant',
     comingSoon: true,
     setupInstructions: [],

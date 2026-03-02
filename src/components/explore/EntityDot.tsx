@@ -11,6 +11,7 @@ interface EntityDotProps {
   dimmed: boolean
   isPeripheral: boolean
   isHubLabel: boolean
+  showAllLabels?: boolean
   onHover: (entity: EntityNode | null, event: React.MouseEvent) => void
   onClick: (entity: EntityNode) => void
 }
@@ -24,6 +25,7 @@ export function EntityDot({
   dimmed,
   isPeripheral,
   isHubLabel,
+  showAllLabels,
   onHover,
   onClick,
 }: EntityDotProps) {
@@ -43,11 +45,14 @@ export function EntityDot({
     onClick(entity)
   }, [entity, onClick])
 
-  // Label truncation
-  const maxLabelLen = isPeripheral ? 12 : 16
+  // When showing all labels (zoomed in), use full label; otherwise truncate
+  const maxLabelLen = showAllLabels ? 999 : (isPeripheral ? 12 : 16)
   const displayLabel = entity.label.length > maxLabelLen
     ? entity.label.slice(0, maxLabelLen - 1) + '…'
     : entity.label
+
+  // Show a label when: hub node, selected, or zoomed in (showAllLabels) and not dimmed
+  const showLabel = isHubLabel || selected || (showAllLabels && !dimmed)
 
   return (
     <g
@@ -80,8 +85,16 @@ export function EntityDot({
         </>
       )}
 
-      {/* Bridge indicator — second-color ring */}
-      {entity.isBridge && !selected && (
+      {/* Anchor halo — rendered before glow shadow for correct layering */}
+      {entity.isAnchor && (
+        <>
+          <circle r={displayRadius + 10} fill="rgba(180,83,9,0.06)" />
+          <circle r={displayRadius + 3} fill="none" stroke="rgba(180,83,9,0.65)" strokeWidth={2} />
+        </>
+      )}
+
+      {/* Bridge indicator — only for non-anchor bridges */}
+      {entity.isBridge && !entity.isAnchor && !selected && (
         <circle
           r={displayRadius + 3}
           fill="none"
@@ -94,30 +107,47 @@ export function EntityDot({
       {/* Glow shadow */}
       <circle
         r={displayRadius + 2}
-        fill={color}
-        opacity={0.12}
+        fill={entity.isAnchor ? 'rgba(180,83,9,0.12)' : color}
+        opacity={entity.isAnchor ? 1 : 0.12}
       />
 
       {/* Main dot */}
       <circle
         r={displayRadius}
-        fill={color}
+        fill={entity.isAnchor ? 'rgb(232,220,208)' : color}
         style={{
           transition: 'r 0.15s ease',
           filter: selected ? `drop-shadow(0 0 4px ${color})` : undefined,
         }}
       />
 
-      {/* Hub label (always visible for hub nodes) or selected label */}
-      {(isHubLabel || selected) && (
+      {/* Anchor symbol — ◆ centred in node */}
+      {entity.isAnchor && (
+        <text
+          y={1}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          style={{
+            fontSize: Math.max(8, displayRadius * 0.85),
+            fill: 'rgba(140,70,0,0.8)',
+            pointerEvents: 'none',
+            userSelect: 'none',
+          }}
+        >
+          ◆
+        </text>
+      )}
+
+      {/* Label: shown for hub nodes, selected node, or when zoomed in */}
+      {showLabel && (
         <text
           y={displayRadius + 14}
           textAnchor="middle"
           style={{
-            fontFamily: isHubLabel ? 'var(--font-display)' : 'var(--font-body)',
-            fontSize: isHubLabel ? 10 : 9,
-            fontWeight: isHubLabel ? 700 : 600,
-            fill: 'var(--color-text-primary)',
+            fontFamily: isHubLabel && !showAllLabels ? 'var(--font-display)' : 'var(--font-body)',
+            fontSize: isHubLabel && !showAllLabels ? 10 : 9,
+            fontWeight: isHubLabel ? 700 : selected ? 600 : 500,
+            fill: selected ? 'var(--color-accent-600)' : 'var(--color-text-primary)',
             pointerEvents: 'none',
             userSelect: 'none',
             textShadow: '0 0 4px var(--color-bg-content), 0 0 4px var(--color-bg-content)',
@@ -127,8 +157,8 @@ export function EntityDot({
         </text>
       )}
 
-      {/* Peripheral label (8px) */}
-      {isPeripheral && !selected && (
+      {/* Peripheral label (smaller, shown when not already showing main label) */}
+      {isPeripheral && !selected && !showLabel && (
         <text
           y={displayRadius + 12}
           textAnchor="middle"

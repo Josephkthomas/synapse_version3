@@ -3,7 +3,7 @@ import { AppShell } from '../components/layout/AppShell'
 import { HomeView } from '../views/HomeView'
 import { ExploreView } from '../views/ExploreView'
 import { AskView } from '../views/AskView'
-import { IngestView } from '../views/IngestView'
+import { CaptureView } from '../views/CaptureView'
 import { AutomateView } from '../views/AutomateView'
 
 const router = createBrowserRouter([
@@ -13,7 +13,8 @@ const router = createBrowserRouter([
       { path: '/', element: <HomeView /> },
       { path: '/explore', element: <ExploreView /> },
       { path: '/ask', element: <AskView /> },
-      { path: '/ingest', element: <IngestView /> },
+      { path: '/capture', element: <CaptureView /> },
+      { path: '/ingest', element: <Navigate to="/capture" replace /> },
       { path: '/automate', element: <AutomateView /> },
       { path: '*', element: <Navigate to="/" replace /> },
     ],

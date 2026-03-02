@@ -7,10 +7,10 @@ interface MeetingIntegrationsCardProps {
 }
 
 const INTEGRATIONS = [
-  { id: 'circleback', name: 'Circleback', icon: '🔵', comingSoon: false },
-  { id: 'fireflies', name: 'Fireflies', icon: '🟣', comingSoon: true },
-  { id: 'tldv', name: 'tl;dv', icon: '🟢', comingSoon: true },
-  { id: 'meetgeek', name: 'MeetGeek', icon: '🟡', comingSoon: true },
+  { id: 'circleback', name: 'Circleback', icon: '/logos/circleback.jpeg', comingSoon: false },
+  { id: 'fireflies', name: 'Fireflies', icon: '/logos/fireflies.jpeg', comingSoon: true },
+  { id: 'tldv', name: 'tl;dv', icon: '/logos/tldv.svg', comingSoon: true },
+  { id: 'meetgeek', name: 'MeetGeek', icon: '/logos/meetgeek.jpeg', comingSoon: true },
 ]
 
 export function MeetingIntegrationsCard({ summary }: MeetingIntegrationsCardProps) {
@@ -36,7 +36,11 @@ export function MeetingIntegrationsCard({ summary }: MeetingIntegrationsCardProp
           return (
             <div key={integration.id} className="flex items-center justify-between" style={{ padding: '3px 0' }}>
               <div className="flex items-center gap-2">
-                <span style={{ fontSize: 12 }}>{integration.icon}</span>
+                <img
+                  src={integration.icon}
+                  alt={integration.name}
+                  style={{ width: 16, height: 16, objectFit: 'contain', borderRadius: 2, flexShrink: 0 }}
+                />
                 <span
                   className="font-body font-semibold"
                   style={{ fontSize: 12, color: 'var(--color-text-primary)' }}

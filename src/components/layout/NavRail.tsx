@@ -3,12 +3,13 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { Home, Compass, MessageSquare, Plus, Zap, Search, Settings, type LucideIcon } from 'lucide-react'
 import { useGraphContext } from '../../hooks/useGraphContext'
 import { Kbd } from '../ui/Kbd'
+import { SynapseLogo } from '../shared/SynapseLogo'
 
 const NAV_ITEMS: Array<{ id: string; label: string; path: string; icon: LucideIcon }> = [
   { id: 'home', label: 'Home', path: '/', icon: Home },
   { id: 'explore', label: 'Explore', path: '/explore', icon: Compass },
   { id: 'ask', label: 'Ask', path: '/ask', icon: MessageSquare },
-  { id: 'ingest', label: 'Ingest', path: '/ingest', icon: Plus },
+  { id: 'capture', label: 'Capture', path: '/capture', icon: Plus },
   { id: 'automate', label: 'Automate', path: '/automate', icon: Zap },
 ]
 
@@ -178,22 +179,7 @@ export function NavRail({ onOpenCommandPalette, onOpenSettings }: NavRailProps) 
           transition: 'padding 0.2s ease',
         }}
       >
-        <div
-          className="flex items-center justify-center shrink-0"
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: 8,
-            background: 'var(--color-accent-500)',
-            color: '#ffffff',
-            fontFamily: 'var(--font-display)',
-            fontSize: 13,
-            fontWeight: 800,
-            lineHeight: 1,
-          }}
-        >
-          S
-        </div>
+        <SynapseLogo size={30} />
         {expanded && (
           <span
             className="whitespace-nowrap overflow-hidden"
