@@ -10,7 +10,7 @@ export interface YouTubePlaylist {
   anchor_emphasis: string
   custom_instructions: string | null
   known_video_count: number
-  status: 'active' | 'paused' | 'error'
+  is_active: boolean
   created_at: string
   updated_at: string
 }

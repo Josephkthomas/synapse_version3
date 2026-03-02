@@ -70,20 +70,16 @@ export function YouTubePlaylistsCard({ playlists, summary }: YouTubePlaylistsCar
                     padding: '2px 6px',
                     borderRadius: 4,
                     background:
-                      pl.status === 'active'
+                      pl.is_active
                         ? 'rgba(16,185,129,0.1)'
-                        : pl.status === 'error'
-                          ? 'rgba(239,68,68,0.1)'
-                          : 'var(--color-bg-inset)',
+                        : 'var(--color-bg-inset)',
                     color:
-                      pl.status === 'active'
+                      pl.is_active
                         ? '#10b981'
-                        : pl.status === 'error'
-                          ? '#ef4444'
-                          : 'var(--color-text-secondary)',
+                        : 'var(--color-text-secondary)',
                   }}
                 >
-                  {pl.status === 'active' ? 'Active' : pl.status === 'error' ? 'Error' : 'Paused'}
+                  {pl.is_active ? 'Active' : 'Paused'}
                 </span>
               </div>
             </div>

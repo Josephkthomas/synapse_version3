@@ -2,7 +2,8 @@ import { useState, useRef, useCallback } from 'react'
 import { useAuth } from './useAuth'
 import { useGraphContext } from './useGraphContext'
 import { queryGraph, buildRAGResponseContext } from '../services/rag'
-import type { ChatMessage, RAGPipelineStep, RAGResponseContext, RAGStepEvent } from '../types/rag'
+import type { ChatMessage, RAGPipelineStep, RAGResponseContext, RAGStepEvent, QueryConfig } from '../types/rag'
+import { DEFAULT_QUERY_CONFIG } from '../types/rag'
 
 function generateId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36)
@@ -15,7 +16,7 @@ export interface UseRAGQueryReturn {
   pipelineEvents: RAGStepEvent[]
   error: string | null
   lastResponseContext: RAGResponseContext | null
-  sendMessage: (text: string) => Promise<void>
+  sendMessage: (text: string, queryConfig?: QueryConfig) => Promise<void>
   clearChat: () => void
 }
 
@@ -30,7 +31,7 @@ export function useRAGQuery(): UseRAGQueryReturn {
   const [lastResponseContext, setLastResponseContext] = useState<RAGResponseContext | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
 
-  const sendMessage = useCallback(async (text: string) => {
+  const sendMessage = useCallback(async (text: string, queryConfig: QueryConfig = DEFAULT_QUERY_CONFIG) => {
     if (!user) return
     if (!text.trim()) return
 
@@ -74,6 +75,7 @@ export function useRAGQuery(): UseRAGQueryReturn {
         text,
         user.id,
         conversationHistory,
+        queryConfig,
         (event) => {
           if (!controller.signal.aborted) {
             if (event.status === 'running') setCurrentStep(event.step)

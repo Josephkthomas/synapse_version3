@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { MessageSquareText } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 import { fetchTopAnchor } from '../../services/supabase'
+import { QUERY_MINDSETS } from '../../config/queryMindsets'
 
 interface EmptyAskStateProps {
   onSendSuggestion: (text: string) => void
@@ -68,6 +69,7 @@ export function EmptyAskState({ onSendSuggestion, isEmpty = false }: EmptyAskSta
         graph context.
       </p>
 
+      {/* Suggestion pills */}
       <div className="flex flex-col items-center" style={{ gap: 8, width: '100%', maxWidth: 440 }}>
         <span
           className="font-display font-bold uppercase"
@@ -101,6 +103,44 @@ export function EmptyAskState({ onSendSuggestion, isEmpty = false }: EmptyAskSta
             {suggestion}
           </button>
         ))}
+      </div>
+
+      {/* Mindset showcase */}
+      <div style={{ marginTop: 32, width: '100%', maxWidth: 520 }}>
+        <span
+          className="font-display font-bold uppercase"
+          style={{ fontSize: 10, color: 'var(--color-text-secondary)', letterSpacing: '0.08em', display: 'block', marginBottom: 10 }}
+        >
+          Query Mindsets
+        </span>
+        <div className="flex" style={{ gap: 8 }}>
+          {QUERY_MINDSETS.map(mindset => (
+            <div
+              key={mindset.id}
+              className="flex-1 text-left font-body"
+              style={{
+                padding: '10px 12px',
+                borderRadius: 10,
+                background: 'var(--color-bg-card)',
+                border: '1px solid var(--border-subtle)',
+                borderTop: `2px solid ${mindset.color}`,
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: 4 }}>
+                {mindset.label}
+              </div>
+              <div style={{ fontSize: 10, fontWeight: 400, color: 'var(--color-text-secondary)', lineHeight: 1.4 }}>
+                {mindset.description.split('.')[0]}.
+              </div>
+            </div>
+          ))}
+        </div>
+        <p
+          className="font-body"
+          style={{ fontSize: 10, color: 'var(--color-text-placeholder)', marginTop: 8, textAlign: 'center' }}
+        >
+          Customise via the toolbar below ↓
+        </p>
       </div>
     </div>
   )

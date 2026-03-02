@@ -1,6 +1,7 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useExtraction } from '../../hooks/useExtraction'
+import { supabase } from '../../services/supabase'
 import { MeetingTranscriptForm } from './MeetingTranscriptForm'
 import { IntegrationCard } from './IntegrationCard'
 import { IntegrationSetupModal } from './IntegrationSetupModal'
@@ -10,13 +11,12 @@ import { EntityReview } from '../shared/EntityReview'
 import type { ExtractionConfig, ReviewEntity } from '../../types/extraction'
 import type { IntegrationConfig, MeetingSource } from '../../types/ingest'
 
-const INTEGRATIONS: IntegrationConfig[] = [
+const BASE_INTEGRATIONS: Omit<IntegrationConfig, 'status'>[] = [
   {
     id: 'circleback',
     name: 'Circleback',
     icon: '🔵',
     description: 'Auto-capture meeting transcripts',
-    status: 'not_connected',
     comingSoon: false,
     setupInstructions: [
       'Go to your Circleback account settings.',
@@ -31,7 +31,6 @@ const INTEGRATIONS: IntegrationConfig[] = [
     name: 'Fireflies',
     icon: '🟣',
     description: 'AI meeting notes and transcripts',
-    status: 'not_connected',
     comingSoon: true,
     setupInstructions: [],
   },
@@ -40,7 +39,6 @@ const INTEGRATIONS: IntegrationConfig[] = [
     name: 'tl;dv',
     icon: '🟢',
     description: 'Record and transcribe meetings',
-    status: 'not_connected',
     comingSoon: true,
     setupInstructions: [],
   },
@@ -49,7 +47,6 @@ const INTEGRATIONS: IntegrationConfig[] = [
     name: 'MeetGeek',
     icon: '🟡',
     description: 'Meeting productivity assistant',
-    status: 'not_connected',
     comingSoon: true,
     setupInstructions: [],
   },
@@ -60,6 +57,31 @@ export function MeetingsTab() {
   const { state, start, approveAndSave, reExtract, reset } = useExtraction()
   const [setupModal, setSetupModal] = useState<IntegrationConfig | null>(null)
   const latestEntitiesRef = useRef<ReviewEntity[] | null>(null)
+
+  // Detect Circleback connection status from DB
+  const [circlebackConnected, setCirclebackConnected] = useState(false)
+
+  useEffect(() => {
+    supabase
+      .from('knowledge_sources')
+      .select('id', { count: 'exact', head: true })
+      .eq('source_type', 'Meeting')
+      .then(({ count }) => {
+        setCirclebackConnected((count ?? 0) > 0)
+      })
+  }, [])
+
+  // Build integrations with dynamic status
+  const integrations: IntegrationConfig[] = useMemo(
+    () =>
+      BASE_INTEGRATIONS.map(config => ({
+        ...config,
+        status: config.id === 'circleback' && circlebackConnected
+          ? 'connected' as const
+          : 'not_connected' as const,
+      })),
+    [circlebackConnected]
+  )
 
   const handleExtract = useCallback(
     async (meeting: MeetingSource, config: ExtractionConfig) => {
@@ -135,7 +157,7 @@ export function MeetingsTab() {
             </p>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-              {INTEGRATIONS.map(config => (
+              {integrations.map(config => (
                 <IntegrationCard
                   key={config.id}
                   config={config}

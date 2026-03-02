@@ -18,11 +18,14 @@ import type {
   EnrichedChunk,
   NodeSummary,
   RelationshipPath,
-  Citation,
+  InlineCitation,
   SemanticChunkResult,
   KeywordNodeResult,
   KeywordSourceResult,
+  QueryConfig,
 } from '../types/rag'
+import { QUERY_MINDSETS, MODEL_TIERS, DEFAULT_MINDSET_ID, DEFAULT_MODEL_TIER_ID } from '../config/queryMindsets'
+import { TOOL_MODES, DEFAULT_TOOL_MODE_ID } from '../config/toolModes'
 import type { SemanticNodeResult } from './supabase'
 import type { KnowledgeNode, KnowledgeEdge } from '../types/database'
 
@@ -164,7 +167,14 @@ async function enrichChunks(chunks: SemanticChunkResult[]): Promise<EnrichedChun
       source_id: chunk.source_id,
       content: chunk.content,
       similarity: chunk.similarity,
-      sourceTitle: source?.title ?? 'Unknown Source',
+      sourceTitle: (() => {
+        const t = source?.title?.trim()
+        const isPlaceholder = !t || /^(untitled|untitled meeting|untitled document|transcript)$/i.test(t)
+        if (!isPlaceholder) return t!
+        if (source?.source_type === 'Meeting') return 'Meeting Recording'
+        if (source?.source_type === 'YouTube') return 'YouTube Video'
+        return 'Unknown Source'
+      })(),
       sourceType: source?.source_type ?? 'Document',
       sourceCreatedAt: source?.created_at ?? new Date().toISOString(),
     }
@@ -172,9 +182,9 @@ async function enrichChunks(chunks: SemanticChunkResult[]): Promise<EnrichedChun
 }
 
 async function resolveCitations(
-  rawCitations: Citation[],
+  rawCitations: InlineCitation[],
   _userId: string
-): Promise<Citation[]> {
+): Promise<InlineCitation[]> {
   const nodeIds = rawCitations
     .map(c => c.node_id)
     .filter((id): id is string => id !== null && id.length > 0)
@@ -189,6 +199,21 @@ async function resolveCitations(
   })
 }
 
+function enrichCitationsWithSnippets(
+  citations: InlineCitation[],
+  enrichedChunks: EnrichedChunk[]
+): InlineCitation[] {
+  return citations.map(citation => {
+    if (!citation.source_id) return citation
+    const chunk = enrichedChunks.find(c =>
+      c.source_id === citation.source_id &&
+      (citation.chunk_index === null || c.source_id === citation.source_id)
+    )
+    if (!chunk) return citation
+    return { ...citation, snippet: chunk.content.slice(0, 120) }
+  })
+}
+
 function formatSourceContext(sources: KeywordSourceResult[]): string {
   if (sources.length === 0) return ''
   return sources
@@ -200,7 +225,7 @@ function formatSourceContext(sources: KeywordSourceResult[]): string {
 
 export interface RAGResponse {
   answer: string
-  citations: Citation[]
+  citations: InlineCitation[]
   sourceChunks: EnrichedChunk[]
   relatedNodes: KnowledgeNode[]
   relatedEdges: KnowledgeEdge[]
@@ -232,12 +257,26 @@ export async function queryGraph(
   question: string,
   userId: string,
   conversationHistory: { role: string; content: string }[],
+  queryConfig?: QueryConfig,
   onStepChange?: (event: RAGStepEvent) => void,
   signal?: AbortSignal
 ): Promise<RAGResponse> {
   const checkAbort = () => {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
   }
+
+  // Resolve tool mode config
+  const toolModeId = queryConfig?.toolMode ?? DEFAULT_TOOL_MODE_ID
+  const toolModeConfig = TOOL_MODES.find(m => m.id === toolModeId)?.pipelineOverrides
+    ?? TOOL_MODES.find(m => m.id === DEFAULT_TOOL_MODE_ID)!.pipelineOverrides
+
+  // Resolve mindset
+  const mindsetId = queryConfig?.mindset ?? DEFAULT_MINDSET_ID
+  const mindset = QUERY_MINDSETS.find(m => m.id === mindsetId)
+
+  // Resolve model tier
+  const modelTierId = queryConfig?.modelTier ?? DEFAULT_MODEL_TIER_ID
+  const modelTier = MODEL_TIERS.find(t => t.id === modelTierId)
 
   // ─── Approach 5: Query Decomposition + Embedding (parallel) ──────────────
   onStepChange?.({ step: 'embedding', status: 'running' })
@@ -283,14 +322,13 @@ export async function queryGraph(
   onStepChange?.({ step: 'keyword_search', status: 'running' })
 
   // ─── Approach 1: Source-first (per-source) + keyword chunks + semantic chunks ──
-  // Fetch per-source so each document contributes up to 8 chunks independently.
-  // A shared limit (e.g. 20 across 4 sources) only returns ~5 intro chunks per source,
-  // missing the detailed content deeper in each document.
+  // Fetch per-source so each document contributes chunks independently.
+  const perSourceLimit = Math.max(4, Math.ceil(toolModeConfig.chunkCount / Math.max(1, allSources.length)))
   const [perSourceChunkArrays, keywordChunkArrays] = await Promise.all([
     allSources.length > 0
-      ? Promise.all(allSources.map(s => fetchChunksForSources([s.id], userId, { limit: 8 })))
+      ? Promise.all(allSources.map(s => fetchChunksForSources([s.id], userId, { limit: perSourceLimit })))
       : Promise.resolve([] as SemanticChunkResult[][]),
-    Promise.all(subQueries.map(sq => keywordSearchChunks(sq, userId, { limit: 12 }))),
+    Promise.all(subQueries.map(sq => keywordSearchChunks(sq, userId, { limit: toolModeConfig.chunkCount }))),
   ])
 
   // Merge all chunk sources; deduplicate by ID
@@ -309,7 +347,7 @@ export async function queryGraph(
 
   // When multiple sources are present, guarantee each source gets ≥2 slots before
   // filling the remainder with the highest-ranked chunks from any source.
-  const finalChunkCount = Math.max(15, Math.min(20, allSources.length * 4))
+  const finalChunkCount = Math.max(toolModeConfig.maxContextChunks, Math.min(toolModeConfig.chunkCount, allSources.length * 4))
   const balancedChunks = balanceChunksBySource(rankedChunks, finalChunkCount, 2)
   onStepChange?.({ step: 'keyword_search', status: 'done', rawChunks: rawChunks.length, rankedChunks: balancedChunks.length })
 
@@ -333,9 +371,9 @@ export async function queryGraph(
     seedNodeIds = fallbackNodes.map(n => n.id)
   }
 
-  // Use up to 15 seeds (expanded from 10 now that semantic nodes contribute)
+  // Use tool mode's frontier limit for seeds
   const { nodes: graphNodes, edges: graphEdges } = seedNodeIds.length > 0
-    ? await traverseGraphFromNodes(seedNodeIds.slice(0, 15), userId, 2)
+    ? await traverseGraphFromNodes(seedNodeIds.slice(0, toolModeConfig.maxFrontier), userId, toolModeConfig.traversalHops)
     : { nodes: [] as KnowledgeNode[], edges: [] as KnowledgeEdge[] }
   onStepChange?.({ step: 'graph_traversal', status: 'done', seedNodes: seedNodeIds.length, graphNodes: graphNodes.length, graphEdges: graphEdges.length })
   checkAbort()
@@ -343,16 +381,23 @@ export async function queryGraph(
   // ─── Context assembly ─────────────────────────────────────────────────────
   onStepChange?.({ step: 'context_assembly', status: 'running' })
 
-  const enrichedChunks = await enrichChunks(balancedChunks)
+  let enrichedChunks = await enrichChunks(balancedChunks)
   checkAbort()
+
+  // Timeline mode: sort chronologically (oldest first) instead of by similarity
+  if (queryConfig?.toolMode === 'timeline') {
+    enrichedChunks = [...enrichedChunks].sort((a, b) =>
+      new Date(a.sourceCreatedAt).getTime() - new Date(b.sourceCreatedAt).getTime()
+    )
+  }
 
   const effectiveKeywordNodes = allKeywordNodes.length > 0 ? allKeywordNodes : fallbackNodes
   const kwNodeSummaries: NodeSummary[] = deduplicateKeywordNodes(effectiveKeywordNodes)
-    .slice(0, 12)
+    .slice(0, Math.ceil(toolModeConfig.maxNodeSummaries / 2))
     .map(n => ({ id: n.id, label: n.label, entity_type: n.entity_type, description: n.description }))
 
   const graphNodeSummaries: NodeSummary[] = deduplicateNodes(graphNodes)
-    .slice(0, 20)
+    .slice(0, toolModeConfig.maxNodeSummaries)
     .map(n => ({ id: n.id, label: n.label, entity_type: n.entity_type, description: n.description ?? null }))
 
   // Include top semantic nodes (high cosine similarity → most conceptually related)
@@ -365,33 +410,42 @@ export async function queryGraph(
     ...graphNodeSummaries,
     ...semanticNodeSummaries,
   ] as unknown as KeywordNodeResult[])
-    .slice(0, 30) as unknown as NodeSummary[]
+    .slice(0, toolModeConfig.maxNodeSummaries) as unknown as NodeSummary[]
 
   const sourceContextNote = formatSourceContext(allSources)
 
   const context: RAGContext = {
     sourceChunks: enrichedChunks,
     nodeSummaries: allNodeSummaries,
-    relationshipPaths: buildRelationshipPaths(graphNodes, graphEdges).slice(0, 20),
+    relationshipPaths: buildRelationshipPaths(graphNodes, graphEdges).slice(0, toolModeConfig.maxRelPaths),
   }
   onStepChange?.({ step: 'context_assembly', status: 'done', contextChunks: enrichedChunks.length, contextNodes: allNodeSummaries.length, relationshipPaths: context.relationshipPaths.length })
 
   // ─── Generate response ────────────────────────────────────────────────────
   onStepChange?.({ step: 'generating', status: 'running' })
+
+  // Apply mindset and model tier to generation
+  const temperature = mindset?.temperatureOverride ?? modelTier?.generationConfig.temperature
+  const maxOutputTokens = modelTier?.generationConfig.maxOutputTokens
+
   const generationResult = await generateRAGResponse(
     context,
     question,
     conversationHistory.slice(-6),
-    sourceContextNote
+    sourceContextNote,
+    mindset?.promptAddition,
+    temperature,
+    maxOutputTokens
   )
   checkAbort()
 
-  // ─── Resolve citations ────────────────────────────────────────────────────
+  // ─── Resolve citations & enrich with snippets ─────────────────────────────
   const resolvedCitations = await resolveCitations(generationResult.citations, userId)
+  const enrichedCitations = enrichCitationsWithSnippets(resolvedCitations, enrichedChunks)
 
   return {
     answer: generationResult.answer,
-    citations: resolvedCitations,
+    citations: enrichedCitations,
     sourceChunks: enrichedChunks,
     relatedNodes: graphNodes,
     relatedEdges: graphEdges,

@@ -9,6 +9,7 @@ interface ChatMessageListProps {
   isLoading: boolean
   pipelineEvents: RAGStepEvent[]
   scroll: UseChatScrollReturn
+  onCitationClick?: (index: number) => void
 }
 
 export function ChatMessageList({
@@ -16,6 +17,7 @@ export function ChatMessageList({
   isLoading,
   pipelineEvents,
   scroll,
+  onCitationClick,
 }: ChatMessageListProps) {
   return (
     <div
@@ -29,7 +31,7 @@ export function ChatMessageList({
         style={{ maxWidth: 840, padding: '24px 48px', gap: 16 }}
       >
         {messages.map(message => (
-          <ChatMessage key={message.id} message={message} />
+          <ChatMessage key={message.id} message={message} onCitationClick={onCitationClick} />
         ))}
 
         {isLoading && (

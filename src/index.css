@@ -155,3 +155,25 @@ body {
     transform: rotate(360deg);
   }
 }
+
+/* Pulse animation (skeleton loading) */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.15;
+  }
+}
+
+/* Slide-in animation for right panel */
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}

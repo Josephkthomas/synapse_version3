@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
+import { RotateCcw } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 import { getGraphStats } from '../../services/supabase'
 
 interface StatusBarProps {
   hasError?: boolean
+  hasMessages?: boolean
+  onClearChat?: () => void
 }
 
-export function StatusBar({ hasError = false }: StatusBarProps) {
+export function StatusBar({ hasError = false, hasMessages = false, onClearChat }: StatusBarProps) {
   const { user } = useAuth()
   const [stats, setStats] = useState<{ nodeCount: number; chunkCount: number } | null>(null)
 
@@ -68,6 +71,39 @@ export function StatusBar({ hasError = false }: StatusBarProps) {
         <span style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>
           · {stats.nodeCount.toLocaleString()} nodes · {stats.chunkCount.toLocaleString()} chunks
         </span>
+      )}
+
+      {hasMessages && onClearChat && (
+        <button
+          type="button"
+          onClick={onClearChat}
+          className="font-body font-semibold cursor-pointer flex items-center"
+          style={{
+            gap: 5,
+            fontSize: 11,
+            color: 'var(--color-text-secondary)',
+            background: 'none',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 6,
+            padding: '3px 8px',
+            marginLeft: 'auto',
+            cursor: 'pointer',
+            transition: 'color 0.15s ease, border-color 0.15s ease',
+          }}
+          onMouseEnter={e => {
+            const el = e.currentTarget as HTMLButtonElement
+            el.style.color = 'var(--color-text-primary)'
+            el.style.borderColor = 'var(--border-default)'
+          }}
+          onMouseLeave={e => {
+            const el = e.currentTarget as HTMLButtonElement
+            el.style.color = 'var(--color-text-secondary)'
+            el.style.borderColor = 'var(--border-subtle)'
+          }}
+        >
+          <RotateCcw size={11} />
+          New chat
+        </button>
       )}
     </div>
   )

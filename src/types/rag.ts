@@ -8,21 +8,59 @@ export type RAGPipelineStep =
   | 'context_assembly'
   | 'generating'
 
+// ─── Query Configuration ──────────────────────────────────────────────────────
+
+export type QueryMindsetId = 'factual' | 'analytical' | 'comparative' | 'exploratory'
+export type ToolModeId = 'quick' | 'deep' | 'timeline'
+export type ModelTierId = 'fast' | 'thorough'
+
+export interface QueryConfig {
+  mindset: QueryMindsetId
+  scopeAnchors: string[]     // Array of anchor node IDs (empty = all)
+  toolMode: ToolModeId
+  modelTier: ModelTierId
+}
+
+export const DEFAULT_QUERY_CONFIG: QueryConfig = {
+  mindset: 'analytical',
+  scopeAnchors: [],
+  toolMode: 'deep',
+  modelTier: 'thorough',
+}
+
+// ─── Chat Messages ────────────────────────────────────────────────────────────
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
-  citations?: Citation[]
+  citations?: InlineCitation[]
   timestamp: Date
   pipelineDurationMs?: number
 }
 
+// ─── Citations ────────────────────────────────────────────────────────────────
+
+/** Legacy citation type — used internally for citation resolution */
 export interface Citation {
   label: string
   entity_type: string
   node_id: string | null
   source_id: string | null
 }
+
+/** Inline citation with [N] index for rendering within response text */
+export interface InlineCitation {
+  index: number               // The [N] number in the response text
+  label: string               // Source title or entity label
+  entity_type: string         // Entity type for badge styling
+  node_id: string | null      // Link to knowledge_nodes
+  source_id: string | null    // Link to knowledge_sources
+  chunk_index: number | null  // Which chunk within the source
+  snippet?: string            // First ~120 chars of chunk content (for tooltip)
+}
+
+// ─── Source / Node types ──────────────────────────────────────────────────────
 
 export interface SourceChunkResult {
   id: string
@@ -59,6 +97,8 @@ export interface RelationshipPath {
   evidence?: string
 }
 
+// ─── RAG Context ──────────────────────────────────────────────────────────────
+
 export interface RAGContext {
   sourceChunks: EnrichedChunk[]
   nodeSummaries: NodeSummary[]
@@ -69,13 +109,15 @@ export interface RAGResponseContext {
   sourceChunks: EnrichedChunk[]
   relatedNodes: KnowledgeNode[]
   relatedEdges: KnowledgeEdge[]
-  citations: Citation[]
+  citations: InlineCitation[]
 }
 
 export interface RAGGenerationResult {
   answer: string
-  citations: Citation[]
+  citations: InlineCitation[]
 }
+
+// ─── Search result types ──────────────────────────────────────────────────────
 
 export interface SemanticChunkResult {
   id: string
@@ -113,6 +155,8 @@ export interface GraphStats {
   edgeCount: number
   sourceCount: number
 }
+
+// ─── Pipeline Events ──────────────────────────────────────────────────────────
 
 export interface RAGStepEvent {
   step: RAGPipelineStep

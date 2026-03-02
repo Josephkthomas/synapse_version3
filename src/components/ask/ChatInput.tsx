@@ -1,12 +1,25 @@
 import { useRef, useState, useCallback } from 'react'
 import { ArrowUp } from 'lucide-react'
+import { InlineQueryToolbar } from './InlineQueryToolbar'
+import type { InlineQueryToolbarProps } from './InlineQueryToolbar'
 
-interface ChatInputProps {
+interface ChatInputProps extends InlineQueryToolbarProps {
   onSend: (text: string) => void
   disabled?: boolean
+  helperText?: string
 }
 
-export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
+export function ChatInput({
+  onSend,
+  disabled = false,
+  helperText,
+  config,
+  onSetMindset,
+  onToggleScopeAnchor,
+  onClearScope,
+  onSetToolMode,
+  onSetModelTier,
+}: ChatInputProps) {
   const [value, setValue] = useState('')
   const [focused, setFocused] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -16,7 +29,6 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
     if (!text || disabled) return
     onSend(text)
     setValue('')
-    // Reset textarea height
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
@@ -48,7 +60,7 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
       style={{
         background: 'var(--color-bg-card)',
         borderTop: '1px solid var(--border-subtle)',
-        padding: '14px 24px',
+        padding: '14px 24px 18px',
       }}
     >
       <div className="mx-auto" style={{ maxWidth: 840 }}>
@@ -95,7 +107,7 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
               width: 32,
               height: 32,
               borderRadius: 8,
-              background: canSend ? 'var(--color-accent-500)' : 'var(--color-accent-500)',
+              background: 'var(--color-accent-500)',
               border: 'none',
               opacity: canSend ? 1 : 0.3,
               cursor: canSend ? 'pointer' : 'default',
@@ -113,13 +125,28 @@ export function ChatInput({ onSend, disabled = false }: ChatInputProps) {
           </button>
         </div>
 
-        {/* Helper text */}
-        <p
-          className="font-body text-center"
-          style={{ fontSize: 10, color: 'var(--color-text-secondary)', marginTop: 6 }}
-        >
-          Retrieves from source chunks, entities, and graph traversal
-        </p>
+        {/* Toolbar + helper text row */}
+        <div className="flex items-center" style={{ marginTop: 8, gap: 8 }}>
+          <InlineQueryToolbar
+            config={config}
+            onSetMindset={onSetMindset}
+            onToggleScopeAnchor={onToggleScopeAnchor}
+            onClearScope={onClearScope}
+            onSetToolMode={onSetToolMode}
+            onSetModelTier={onSetModelTier}
+          />
+          <span
+            className="font-body"
+            style={{
+              fontSize: 10,
+              color: 'var(--color-text-secondary)',
+              marginLeft: 'auto',
+              flexShrink: 0,
+            }}
+          >
+            {helperText ?? 'Graph RAG · entities · traversal'}
+          </span>
+        </div>
       </div>
     </div>
   )

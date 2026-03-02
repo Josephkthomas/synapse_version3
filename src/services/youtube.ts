@@ -107,3 +107,61 @@ export async function fetchPlaylistVideos(
 export function hasYouTubeApiKey(): boolean {
   return !!YOUTUBE_API_KEY
 }
+
+// --- Video URL Parsing ---
+
+const VIDEO_URL_PATTERNS = [
+  /youtube\.com\/watch\?v=([\w-]{11})/,
+  /youtu\.be\/([\w-]{11})/,
+  /youtube\.com\/embed\/([\w-]{11})/,
+  /youtube\.com\/shorts\/([\w-]{11})/,
+  /^([\w-]{11})$/,
+]
+
+export function parseVideoUrl(url: string): string | null {
+  const trimmed = url.trim()
+  for (const pattern of VIDEO_URL_PATTERNS) {
+    const match = trimmed.match(pattern)
+    if (match?.[1]) return match[1]
+  }
+  return null
+}
+
+// --- Video Metadata ---
+
+export async function fetchVideoTitle(videoId: string): Promise<string | null> {
+  if (!YOUTUBE_API_KEY) return null
+  try {
+    const response = await fetch(
+      `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${YOUTUBE_API_KEY}`
+    )
+    if (!response.ok) return null
+    const data = await response.json()
+    return (data.items?.[0]?.snippet?.title as string | undefined) ?? null
+  } catch {
+    return null
+  }
+}
+
+// --- Manual Transcript Fetch ---
+
+export async function fetchYouTubeTranscript(
+  videoUrl: string,
+  authToken: string
+): Promise<{ transcript: string; videoId: string; language: string; tier: number }> {
+  const res = await fetch('/api/youtube/transcript', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${authToken}`,
+    },
+    body: JSON.stringify({ videoUrl }),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Failed to fetch transcript' })) as { error?: string }
+    throw new Error(err.error ?? `Transcript fetch failed: ${res.status}`)
+  }
+
+  return await res.json() as { transcript: string; videoId: string; language: string; tier: number }
+}

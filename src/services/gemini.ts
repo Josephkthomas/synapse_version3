@@ -1,5 +1,5 @@
 import type { ExtractionResult, ExtractedEntity, ExtractedRelationship } from '../types/extraction'
-import type { RAGContext, RAGGenerationResult, Citation } from '../types/rag'
+import type { RAGContext, RAGGenerationResult, InlineCitation } from '../types/rag'
 
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models'
@@ -279,7 +279,7 @@ export async function embedQuery(text: string): Promise<number[]> {
 
 // ─── RAG: Response Generation ─────────────────────────────────────────────────
 
-function buildRAGSystemPrompt(context: RAGContext, sourceContextNote?: string): string {
+function buildRAGSystemPrompt(context: RAGContext, sourceContextNote?: string, mindsetPromptAddition?: string): string {
   // Detect when multiple distinct sources are present — triggers comparison mode
   const distinctSources = new Set(context.sourceChunks.map(c => c.source_id))
   const isMultiSource = distinctSources.size >= 2
@@ -322,27 +322,31 @@ ANSWERING RULES (follow these exactly):
 5. RELATIONSHIPS — Use the entity relationship paths to explain HOW concepts connect to each other.
 6. FORMATTING — Write in clear flowing prose. Use **bold** for people's names, key terms, product names, and important facts. Use natural paragraph breaks for readability.
 7. "LATEST" QUERIES — When asked about "the latest", "most recent", or "newest", use the dates in chunk headers and the matched documents list to identify the correct content.
-8. HONESTY — Only state you lack information if the context is genuinely empty. If partial context exists, use it and note what is and isn't covered.${isMultiSource ? `
-9. COMPARISON QUERIES — ${distinctSources.size} distinct sources are present in the context. When the user asks to compare, contrast, or find differences/similarities between documents or sessions:
-   - Dedicate a section to EACH source (label by source title)
-   - Explicitly state what each source says on the topic
-   - Then synthesize: similarities, differences, patterns across sources
-   - Do NOT merge content from different sources without attribution — keep it clear which source says what
-   - If one source has richer detail, report what the other source DOES say, even if it's brief` : ''}
-${sourcesSection}
+8. HONESTY — Only state you lack information if the context is genuinely empty. If partial context exists, use it and note what is and isn't covered.
+9. INLINE CITATIONS — Use [N] numbered references inline in your answer text (e.g. "The project launched in Q3 [1] and expanded later [2]"). Every factual claim should have a citation. Cite source chunks with their chunk number. Ensure every [N] in the answer has a matching entry in the citations array.${isMultiSource ? `
+10. COMPARISON QUERIES — ${distinctSources.size} distinct sources are present in the context. When the user asks to compare, contrast, or find differences/similarities between documents or sessions:
+    - Dedicate a section to EACH source (label by source title)
+    - Explicitly state what each source says on the topic
+    - Then synthesize: similarities, differences, patterns across sources
+    - Do NOT merge content from different sources without attribution — keep it clear which source says what
+    - If one source has richer detail, report what the other source DOES say, even if it's brief` : ''}
+${mindsetPromptAddition ? `\n${mindsetPromptAddition}\n` : ''}${sourcesSection}
 ═══════════════════════════════════════════════════
 RESPONSE FORMAT — return ONLY valid JSON:
 {
-  "answer": "Your comprehensive, detailed answer here. Multiple paragraphs if needed. Use **bold** for key entities.",
+  "answer": "Your comprehensive answer with [1], [2], [3] inline citations. Use **bold** for key entities.",
   "citations": [
     {
-      "label": "Name of the cited entity or document",
+      "index": 1,
+      "label": "Source title or entity label",
       "entity_type": "Person | Topic | Organization | Event | Tool | Concept",
       "node_id": "the node UUID if citing a knowledge node, otherwise null",
-      "source_id": "the source UUID if citing a document chunk, otherwise null"
+      "source_id": "the source UUID if citing a document chunk, otherwise null",
+      "chunk_index": 0
     }
   ]
 }
+Ensure every [N] reference in your answer text has a corresponding entry in the citations array with matching index.
 ═══════════════════════════════════════════════════
 
 SOURCE CHUNKS — your primary evidence (read all of them carefully):
@@ -367,14 +371,16 @@ function parseRAGResponse(responseText: string): RAGGenerationResult {
   try {
     const parsed = JSON.parse(cleaned) as { answer?: unknown; citations?: unknown[] }
     const answer = typeof parsed.answer === 'string' ? parsed.answer : cleaned
-    const citations: Citation[] = Array.isArray(parsed.citations)
+    const citations: InlineCitation[] = Array.isArray(parsed.citations)
       ? (parsed.citations as Record<string, unknown>[])
           .filter(c => typeof c === 'object' && c !== null)
-          .map(c => ({
+          .map((c, i) => ({
+            index: typeof c['index'] === 'number' ? c['index'] : i + 1,
             label: typeof c['label'] === 'string' ? c['label'] : '',
             entity_type: typeof c['entity_type'] === 'string' ? c['entity_type'] : 'Topic',
-            node_id: typeof c['node_id'] === 'string' ? c['node_id'] : null,
-            source_id: typeof c['source_id'] === 'string' ? c['source_id'] : null,
+            node_id: typeof c['node_id'] === 'string' && c['node_id'] !== 'null' ? c['node_id'] : null,
+            source_id: typeof c['source_id'] === 'string' && c['source_id'] !== 'null' ? c['source_id'] : null,
+            chunk_index: typeof c['chunk_index'] === 'number' ? c['chunk_index'] : null,
           }))
       : []
     return { answer, citations }
@@ -447,13 +453,16 @@ export async function generateRAGResponse(
   context: RAGContext,
   question: string,
   conversationHistory: { role: string; content: string }[],
-  sourceContextNote?: string
+  sourceContextNote?: string,
+  mindsetPromptAddition?: string,
+  temperatureOverride?: number,
+  maxOutputTokens?: number
 ): Promise<RAGGenerationResult> {
   if (!GEMINI_API_KEY) {
     throw new ExtractionError('VITE_GEMINI_API_KEY is not configured')
   }
 
-  const systemPrompt = buildRAGSystemPrompt(context, sourceContextNote)
+  const systemPrompt = buildRAGSystemPrompt(context, sourceContextNote, mindsetPromptAddition)
 
   const contents = [
     ...conversationHistory.map(msg => ({
@@ -472,7 +481,8 @@ export async function generateRAGResponse(
         system_instruction: { parts: [{ text: systemPrompt }] },
         contents,
         generationConfig: {
-          temperature: 0.3,
+          temperature: temperatureOverride ?? 0.3,
+          maxOutputTokens: maxOutputTokens ?? 4096,
           responseMimeType: 'application/json',
         },
       }),

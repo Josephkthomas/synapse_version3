@@ -1,55 +1,117 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { Sparkles } from 'lucide-react'
-import { CitationBadges } from './CitationBadges'
-import type { ChatMessage as ChatMessageType } from '../../types/rag'
+import { CitationTooltip } from './CitationTooltip'
+import type { ChatMessage as ChatMessageType, InlineCitation } from '../../types/rag'
 
 interface ChatMessageProps {
   message: ChatMessageType
+  onCitationClick?: (index: number) => void
 }
 
-function parseContent(content: string): React.ReactNode {
-  // Split by **bold** markers and line breaks
-  const parts = content.split(/(\*\*[^*]+\*\*|\n\n|\n|`[^`]+`)/)
+interface HoveredCitation {
+  citation: InlineCitation
+  rect: DOMRect
+}
+
+function parseContent(
+  content: string,
+  citations: InlineCitation[],
+  onCitationClick?: (index: number) => void,
+  onCitationHover?: (citation: InlineCitation, rect: DOMRect) => void,
+  onCitationLeave?: () => void
+): React.ReactNode[] {
+  const parts = content.split(/(\[\d+\])/g)
   return parts.map((part, i) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
+    const match = part.match(/^\[(\d+)\]$/)
+    if (match) {
+      const citIndex = parseInt(match[1] ?? '0', 10)
+      const citation = citations.find(c => c.index === citIndex)
+      if (!citation) return <span key={i}>{part}</span>
+
       return (
-        <strong key={i} style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
-          {part.slice(2, -2)}
-        </strong>
-      )
-    }
-    if (part.startsWith('`') && part.endsWith('`')) {
-      return (
-        <code
+        <span
           key={i}
-          className="font-body"
+          onClick={() => onCitationClick?.(citIndex)}
+          onMouseEnter={e => onCitationHover?.(citation, e.currentTarget.getBoundingClientRect())}
+          onMouseLeave={onCitationLeave}
+          className="font-body font-bold cursor-pointer"
           style={{
-            fontSize: 12,
-            background: 'var(--color-bg-inset)',
-            padding: '2px 6px',
+            background: 'rgba(214,58,0,0.08)',
+            border: '1px solid rgba(214,58,0,0.15)',
             borderRadius: 4,
+            padding: '1px 5px',
+            fontSize: 10,
+            fontWeight: 700,
+            color: 'var(--color-accent-500)',
+            verticalAlign: 'super',
+            lineHeight: 1,
+            transition: 'background 0.15s ease, border-color 0.15s ease',
           }}
         >
-          {part.slice(1, -1)}
-        </code>
+          {citIndex}
+        </span>
       )
     }
-    if (part === '\n\n') return <br key={i} />
-    if (part === '\n') return <br key={i} />
-    return part
+
+    // Parse markdown within non-citation parts
+    const subParts = part.split(/(\*\*[^*]+\*\*|\n\n|\n|`[^`]+`)/)
+    return subParts.map((sub, j) => {
+      if (sub.startsWith('**') && sub.endsWith('**')) {
+        return (
+          <strong key={`${i}-${j}`} style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
+            {sub.slice(2, -2)}
+          </strong>
+        )
+      }
+      if (sub.startsWith('`') && sub.endsWith('`')) {
+        return (
+          <code
+            key={`${i}-${j}`}
+            className="font-body"
+            style={{
+              fontSize: 12,
+              background: 'var(--color-bg-inset)',
+              padding: '2px 6px',
+              borderRadius: 4,
+            }}
+          >
+            {sub.slice(1, -1)}
+          </code>
+        )
+      }
+      if (sub === '\n\n') return <br key={`${i}-${j}`} />
+      if (sub === '\n') return <br key={`${i}-${j}`} />
+      return sub
+    })
   })
 }
 
-export function ChatMessage({ message }: ChatMessageProps) {
+export function ChatMessage({ message, onCitationClick }: ChatMessageProps) {
   const [expanded, setExpanded] = useState(false)
+  const [hoveredCitation, setHoveredCitation] = useState<HoveredCitation | null>(null)
+  const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
+  const citations = message.citations ?? []
 
   const TRUNCATE_LENGTH = 500
   const shouldTruncate = isUser && message.content.length > TRUNCATE_LENGTH
   const displayContent = shouldTruncate && !expanded
     ? message.content.slice(0, TRUNCATE_LENGTH) + '...'
     : message.content
+
+  const handleCitationHover = (citation: InlineCitation, rect: DOMRect) => {
+    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current)
+    tooltipTimerRef.current = setTimeout(() => {
+      setHoveredCitation({ citation, rect })
+    }, 200)
+  }
+
+  const handleCitationLeave = () => {
+    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current)
+    setHoveredCitation(null)
+  }
 
   if (isSystem) {
     return (
@@ -121,9 +183,17 @@ export function ChatMessage({ message }: ChatMessageProps) {
           >
             {isUser ? 'You' : 'Synapse'}
           </span>
+          {!isUser && message.pipelineDurationMs && (
+            <span
+              className="font-body"
+              style={{ fontSize: 10, color: 'var(--color-text-placeholder)', marginLeft: 'auto' }}
+            >
+              {(message.pipelineDurationMs / 1000).toFixed(1)}s
+            </span>
+          )}
         </div>
 
-        {/* Content */}
+        {/* Content with inline citations */}
         <div
           className="font-body"
           style={{
@@ -134,7 +204,10 @@ export function ChatMessage({ message }: ChatMessageProps) {
             whiteSpace: 'pre-wrap',
           }}
         >
-          {parseContent(displayContent)}
+          {isUser
+            ? parseContent(displayContent, [])
+            : parseContent(displayContent, citations, onCitationClick, handleCitationHover, handleCitationLeave)
+          }
           {shouldTruncate && (
             <button
               type="button"
@@ -154,12 +227,15 @@ export function ChatMessage({ message }: ChatMessageProps) {
             </button>
           )}
         </div>
-
-        {/* Citations */}
-        {message.citations && message.citations.length > 0 && (
-          <CitationBadges citations={message.citations} />
-        )}
       </div>
+
+      {/* Citation tooltip portal-like overlay */}
+      {hoveredCitation && (
+        <CitationTooltip
+          citation={hoveredCitation.citation}
+          rect={hoveredCitation.rect}
+        />
+      )}
     </div>
   )
 }

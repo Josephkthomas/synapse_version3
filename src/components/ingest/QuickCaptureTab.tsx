@@ -1,16 +1,21 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Paperclip, Link, Sparkles } from 'lucide-react'
+import { Paperclip, Link, Sparkles, Loader, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../../hooks/useAuth'
 import { useSettings } from '../../hooks/useSettings'
 import { useExtraction } from '../../hooks/useExtraction'
+import { extractTextFromFile } from '../../utils/fileParser'
 import { AdvancedOptions } from './AdvancedOptions'
 import { ExtractionProgress } from './ExtractionProgress'
 import { ExtractionSummary } from './ExtractionSummary'
 import { EntityReview } from '../shared/EntityReview'
 import type { ExtractionConfig, ReviewEntity } from '../../types/extraction'
 
+const ACCEPTED_FILE_TYPES = '.pdf,.docx,.md,.txt,.csv'
+
 export function QuickCaptureTab() {
   const navigate = useNavigate()
+  const { session } = useAuth()
   const { profile, extractionSettings, anchors } = useSettings()
   const { state, start, approveAndSave, reExtract, reset } = useExtraction()
 
@@ -25,6 +30,17 @@ export function QuickCaptureTab() {
   const [selectedAnchorIds, setSelectedAnchorIds] = useState<string[]>([])
   const [customGuidance, setCustomGuidance] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // File attach state
+  const [isParsingFile, setIsParsingFile] = useState(false)
+  const [fileError, setFileError] = useState<string | null>(null)
+
+  // URL fetch state
+  const [showUrlInput, setShowUrlInput] = useState(false)
+  const [urlValue, setUrlValue] = useState('')
+  const [isFetchingUrl, setIsFetchingUrl] = useState(false)
+  const [urlError, setUrlError] = useState<string | null>(null)
 
   // Sync with extraction settings when they load
   useEffect(() => {
@@ -41,6 +57,112 @@ export function QuickCaptureTab() {
     el.style.height = 'auto'
     el.style.height = Math.min(el.scrollHeight, 400) + 'px'
   }, [])
+
+  // Resize textarea to fit content programmatically
+  const autoResizeTextarea = useCallback(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 400) + 'px'
+  }, [])
+
+  // ── File attach handler ───────────────────────────────────────────────────
+  const handleFileAttach = useCallback(() => {
+    fileInputRef.current?.click()
+  }, [])
+
+  const handleFileSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    // Reset input so same file can be selected again
+    e.target.value = ''
+
+    setFileError(null)
+    setIsParsingFile(true)
+
+    try {
+      const text = await extractTextFromFile(file)
+      if (!text.trim()) {
+        setFileError('No extractable text found in the file.')
+        return
+      }
+      // Append to existing content with a separator, or set if empty
+      setContent(prev => {
+        if (prev.trim()) return prev + '\n\n---\n\n' + text
+        return text
+      })
+      // Auto-resize after content update
+      setTimeout(autoResizeTextarea, 0)
+    } catch (err) {
+      setFileError(err instanceof Error ? err.message : 'Failed to extract text from file')
+    } finally {
+      setIsParsingFile(false)
+    }
+  }, [autoResizeTextarea])
+
+  // ── URL fetch handler ─────────────────────────────────────────────────────
+  const handleFetchUrl = useCallback(async () => {
+    const url = urlValue.trim()
+    if (!url) return
+
+    // Basic URL validation
+    try {
+      new URL(url.startsWith('http') ? url : `https://${url}`)
+    } catch {
+      setUrlError('Please enter a valid URL.')
+      return
+    }
+
+    const authToken = session?.access_token
+    if (!authToken) {
+      setUrlError('Not authenticated. Please sign in and try again.')
+      return
+    }
+
+    setUrlError(null)
+    setIsFetchingUrl(true)
+
+    try {
+      const fullUrl = url.startsWith('http') ? url : `https://${url}`
+      const res = await fetch('/api/content/fetch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ url: fullUrl }),
+      })
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Failed to fetch URL' })) as { error?: string }
+        throw new Error(err.error ?? `Fetch failed: ${res.status}`)
+      }
+
+      const data = await res.json() as { title?: string; content: string; url: string }
+
+      if (!data.content?.trim()) {
+        setUrlError('No readable content found at this URL.')
+        return
+      }
+
+      // Prepend title if available
+      const fetched = data.title
+        ? `# ${data.title}\nSource: ${data.url}\n\n${data.content}`
+        : `Source: ${data.url}\n\n${data.content}`
+
+      setContent(prev => {
+        if (prev.trim()) return prev + '\n\n---\n\n' + fetched
+        return fetched
+      })
+      setShowUrlInput(false)
+      setUrlValue('')
+      setTimeout(autoResizeTextarea, 0)
+    } catch (err) {
+      setUrlError(err instanceof Error ? err.message : 'Failed to fetch URL content')
+    } finally {
+      setIsFetchingUrl(false)
+    }
+  }, [urlValue, session, autoResizeTextarea])
 
   // Start extraction
   const handleExtract = useCallback(async () => {
@@ -65,8 +187,6 @@ export function QuickCaptureTab() {
 
   // Update entities during review
   const handleEntitiesChange = useCallback((entities: ReviewEntity[]) => {
-    // The useExtraction hook doesn't expose direct entity updates,
-    // so we track the latest entities and pass them in handleSave
     latestEntitiesRef.current = entities
   }, [])
 
@@ -91,6 +211,10 @@ export function QuickCaptureTab() {
     setContent('')
     setCustomGuidance('')
     setSelectedAnchorIds([])
+    setShowUrlInput(false)
+    setUrlValue('')
+    setFileError(null)
+    setUrlError(null)
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
@@ -114,9 +238,97 @@ export function QuickCaptureTab() {
 
   return (
     <div>
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={ACCEPTED_FILE_TYPES}
+        onChange={handleFileSelected}
+        style={{ display: 'none' }}
+      />
+
       {/* Idle State: Textarea + Extract Button */}
       {isIdle && (
         <>
+          {/* URL Input Bar */}
+          {showUrlInput && (
+            <div
+              style={{
+                background: 'var(--color-bg-card)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 10,
+                padding: '10px 14px',
+                marginBottom: 8,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <Link size={14} style={{ color: 'var(--color-text-secondary)', flexShrink: 0 }} />
+              <input
+                type="text"
+                value={urlValue}
+                onChange={e => { setUrlValue(e.target.value); setUrlError(null) }}
+                onKeyDown={e => { if (e.key === 'Enter') void handleFetchUrl() }}
+                placeholder="Paste a URL to fetch content..."
+                autoFocus
+                className="font-body w-full"
+                style={{
+                  fontSize: 13,
+                  background: 'transparent',
+                  border: 'none',
+                  outline: 'none',
+                  color: 'var(--color-text-primary)',
+                }}
+              />
+              {isFetchingUrl ? (
+                <Loader size={14} style={{ color: 'var(--color-accent-500)', animation: 'spin 1s linear infinite', flexShrink: 0 }} />
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => void handleFetchUrl()}
+                    disabled={!urlValue.trim()}
+                    className="font-body font-semibold cursor-pointer"
+                    style={{
+                      fontSize: 11,
+                      padding: '4px 12px',
+                      borderRadius: 6,
+                      background: 'var(--color-accent-500)',
+                      border: 'none',
+                      color: 'white',
+                      flexShrink: 0,
+                      opacity: urlValue.trim() ? 1 : 0.4,
+                    }}
+                  >
+                    Fetch
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowUrlInput(false); setUrlValue(''); setUrlError(null) }}
+                    className="cursor-pointer"
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      padding: 2,
+                      color: 'var(--color-text-secondary)',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <X size={14} />
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* URL fetch error */}
+          {urlError && (
+            <p className="font-body" style={{ fontSize: 11, color: 'var(--color-semantic-red-500)', marginBottom: 6, paddingLeft: 2 }}>
+              {urlError}
+            </p>
+          )}
+
           {/* Textarea Card */}
           <div
             style={{
@@ -146,6 +358,13 @@ export function QuickCaptureTab() {
               }}
             />
 
+            {/* File parse error */}
+            {fileError && (
+              <p className="font-body" style={{ fontSize: 11, color: 'var(--color-semantic-red-500)', marginBottom: 8 }}>
+                {fileError}
+              </p>
+            )}
+
             {/* Action Bar */}
             <div
               style={{
@@ -161,6 +380,8 @@ export function QuickCaptureTab() {
                 <button
                   type="button"
                   className="cursor-pointer"
+                  onClick={handleFileAttach}
+                  disabled={isParsingFile}
                   style={{
                     background: 'transparent',
                     border: 'none',
@@ -168,21 +389,27 @@ export function QuickCaptureTab() {
                     borderRadius: 6,
                     color: 'var(--color-text-secondary)',
                   }}
-                  title="Attach file (coming soon)"
+                  title="Attach a file (PDF, DOCX, MD, TXT, CSV)"
                 >
-                  <Paperclip size={16} />
+                  {isParsingFile ? (
+                    <Loader size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                  ) : (
+                    <Paperclip size={16} />
+                  )}
                 </button>
                 <button
                   type="button"
                   className="cursor-pointer"
+                  onClick={() => setShowUrlInput(prev => !prev)}
+                  disabled={isFetchingUrl}
                   style={{
-                    background: 'transparent',
+                    background: showUrlInput ? 'var(--color-bg-inset)' : 'transparent',
                     border: 'none',
                     padding: 6,
                     borderRadius: 6,
-                    color: 'var(--color-text-secondary)',
+                    color: showUrlInput ? 'var(--color-accent-500)' : 'var(--color-text-secondary)',
                   }}
-                  title="Add URL (coming soon)"
+                  title="Fetch content from a URL"
                 >
                   <Link size={16} />
                 </button>

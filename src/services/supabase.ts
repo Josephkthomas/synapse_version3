@@ -1066,7 +1066,7 @@ export async function connectPlaylist(
     synapse_code: synapseCode,
     extraction_mode: settings?.default_mode ?? 'comprehensive',
     anchor_emphasis: settings?.default_anchor_emphasis ?? 'standard',
-    status: 'active',
+    is_active: true,
   }
 
   if (metadata?.name) payload.playlist_name = metadata.name
@@ -1132,6 +1132,20 @@ export async function disconnectPlaylist(playlistId: string): Promise<void> {
 
   if (error) {
     throw new Error(`Failed to disconnect playlist: ${error.message}`)
+  }
+}
+
+export async function togglePlaylistStatus(
+  playlistId: string,
+  isActive: boolean
+): Promise<void> {
+  const { error } = await supabase
+    .from('youtube_playlists')
+    .update({ is_active: isActive, updated_at: new Date().toISOString() })
+    .eq('id', playlistId)
+
+  if (error) {
+    throw new Error(`Failed to update playlist status: ${error.message}`)
   }
 }
 
@@ -1424,10 +1438,10 @@ export async function getAutomationSummary(userId: string): Promise<AutomationSu
       try {
         const { data } = await supabase
           .from('youtube_playlists')
-          .select('status, known_video_count')
+          .select('is_active, known_video_count')
           .eq('user_id', userId)
-        return (data ?? []) as { status: string; known_video_count: number }[]
-      } catch { return [] as { status: string; known_video_count: number }[] }
+        return (data ?? []) as { is_active: boolean; known_video_count: number }[]
+      } catch { return [] as { is_active: boolean; known_video_count: number }[] }
     })(),
     (async () => {
       try {
@@ -1471,7 +1485,7 @@ export async function getAutomationSummary(userId: string): Promise<AutomationSu
       activeChannelCount: channelData.filter(c => c.is_active).length,
       totalVideosIngested: channelData.reduce((sum, c) => sum + (c.total_videos_ingested ?? 0), 0),
       playlistCount: playlistData.length,
-      activePlaylistCount: playlistData.filter(p => p.status === 'active').length,
+      activePlaylistCount: playlistData.filter(p => p.is_active).length,
       totalPlaylistVideos: playlistData.reduce((sum, p) => sum + (p.known_video_count ?? 0), 0),
     },
     meetings: {

@@ -3,7 +3,9 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useRAGQuery } from '../hooks/useRAGQuery'
 import { useChatScroll } from '../hooks/useChatScroll'
+import { useQueryComposer } from '../hooks/useQueryComposer'
 import { getGraphStats } from '../services/supabase'
+import { DEFAULT_QUERY_CONFIG } from '../types/rag'
 import { StatusBar } from '../components/ask/StatusBar'
 import { ChatMessageList } from '../components/ask/ChatMessageList'
 import { ChatInput } from '../components/ask/ChatInput'
@@ -13,12 +15,18 @@ export function AskView() {
   const { user } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
-  const { messages, isLoading, pipelineEvents, error, sendMessage } = useRAGQuery()
+  const { messages, isLoading, pipelineEvents, error, sendMessage, clearChat } = useRAGQuery()
   const scroll = useChatScroll(messages.length)
+  const {
+    config,
+    setMindset,
+    toggleScopeAnchor,
+    clearScope,
+    setToolMode,
+    setModelTier,
+  } = useQueryComposer()
   const [graphIsEmpty, setGraphIsEmpty] = useState(false)
 
-  // Capture the auto-query from router state once on mount.
-  // We read it into a ref immediately so it survives re-renders.
   const pendingAutoQuery = useRef(
     (location.state as { autoQuery?: string } | null)?.autoQuery ?? ''
   )
@@ -26,36 +34,42 @@ export function AskView() {
   useEffect(() => {
     if (!user) return
     getGraphStats(user.id)
-      .then(s => {
-        setGraphIsEmpty(s.nodeCount === 0)
-      })
+      .then(s => setGraphIsEmpty(s.nodeCount === 0))
       .catch(() => {})
   }, [user])
 
-  // Fire the auto-query once user is available, then clear router state.
+  // Fire the auto-query once using the default config
   useEffect(() => {
     const query = pendingAutoQuery.current
     if (!query || !user) return
     pendingAutoQuery.current = ''
-    // Replace history entry to prevent re-firing if user navigates back/forward
     navigate('/ask', { state: {}, replace: true })
-    void sendMessage(query)
+    void sendMessage(query, DEFAULT_QUERY_CONFIG)
   }, [user, sendMessage, navigate])
 
   const handleSend = (text: string) => {
-    void sendMessage(text)
+    void sendMessage(text, config)
   }
 
   const handleSuggestion = (text: string) => {
-    void sendMessage(text)
+    void sendMessage(text, config)
   }
 
   const hasMessages = messages.length > 0
 
+  const helperText =
+    config.scopeAnchors.length > 0
+      ? `Scoped to ${config.scopeAnchors.length} anchor${config.scopeAnchors.length > 1 ? 's' : ''}`
+      : undefined
+
   return (
-    <div className="flex flex-col h-screen">
-      {/* Status bar */}
-      <StatusBar hasError={!!error && !hasMessages} />
+    <div className="flex flex-col h-full">
+      {/* Status bar with reset */}
+      <StatusBar
+        hasError={!!error && !hasMessages}
+        hasMessages={hasMessages}
+        onClearChat={clearChat}
+      />
 
       {/* Chat area */}
       {!hasMessages ? (
@@ -71,8 +85,18 @@ export function AskView() {
         />
       )}
 
-      {/* Input bar */}
-      <ChatInput onSend={handleSend} disabled={isLoading} />
+      {/* Input bar with inline dropdown toolbar */}
+      <ChatInput
+        onSend={handleSend}
+        disabled={isLoading}
+        helperText={helperText}
+        config={config}
+        onSetMindset={setMindset}
+        onToggleScopeAnchor={toggleScopeAnchor}
+        onClearScope={clearScope}
+        onSetToolMode={setToolMode}
+        onSetModelTier={setModelTier}
+      />
     </div>
   )
 }

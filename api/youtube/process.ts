@@ -14,7 +14,7 @@ const APIFY_ACTOR_ID = 'pintostudio/youtube-transcript-scraper';
 
 const MAX_ITEMS_PER_BATCH = 2;      // cron mode
 const MAX_ITEMS_PROCESS_ALL = 20;   // user-triggered mode
-const MAX_TRANSCRIPT_CHARS = 50_000;
+const MAX_TRANSCRIPT_CHARS = 100_000;
 
 // ─── TYPES ─────────────────────────────────────────────────────────────────────
 
@@ -269,6 +269,21 @@ async function fetchTranscriptTier3(videoUrl: string): Promise<{
   }
 }
 
+// ─── TRANSCRIPT FORMATTING ─────────────────────────────────────────────────────
+
+function formatTranscriptText(text: string): string {
+  // Group flat caption text into readable paragraphs (~7 sentences each)
+  // so Gemini sees semantic structure instead of one long run-on string
+  const sentences = text.match(/[^.!?]+[.!?]+/g) ?? [text];
+  const paragraphs: string[] = [];
+  const SENTENCES_PER_PARAGRAPH = 7;
+  for (let i = 0; i < sentences.length; i += SENTENCES_PER_PARAGRAPH) {
+    const para = sentences.slice(i, i + SENTENCES_PER_PARAGRAPH).join('').trim();
+    if (para) paragraphs.push(para);
+  }
+  return paragraphs.length > 1 ? paragraphs.join('\n\n') : text;
+}
+
 // ─── TRANSCRIPT ORCHESTRATOR ───────────────────────────────────────────────────
 
 async function fetchTranscript(
@@ -277,16 +292,16 @@ async function fetchTranscript(
 ): Promise<{ transcript: string | null; language: string | null; tier: number }> {
   // Tier 1
   const t1 = await fetchTranscriptTier1(videoId);
-  if (t1) return { transcript: t1, language: 'en', tier: 1 };
+  if (t1) return { transcript: formatTranscriptText(t1), language: 'en', tier: 1 };
 
   // Tier 2
   const t2 = await fetchTranscriptTier2(videoId);
-  if (t2) return { transcript: t2, language: 'en', tier: 2 };
+  if (t2) return { transcript: formatTranscriptText(t2), language: 'en', tier: 2 };
 
   // Tier 3
   const t3 = await fetchTranscriptTier3(videoUrl);
   if (t3.success && t3.transcript) {
-    return { transcript: t3.transcript, language: t3.language ?? 'en', tier: 3 };
+    return { transcript: formatTranscriptText(t3.transcript), language: t3.language ?? 'en', tier: 3 };
   }
 
   return { transcript: null, language: null, tier: 0 };
@@ -671,7 +686,7 @@ async function processQueueItem(
     }
 
     // ── STEP 8: CROSS-CONNECTION DISCOVERY ─────────────────────────────────────
-    if (savedNodeMap.size > 0 && savedNodeMap.size <= 20) {
+    if (savedNodeMap.size > 0) {
       try {
         const newNodeIds = Array.from(savedNodeMap.values());
 

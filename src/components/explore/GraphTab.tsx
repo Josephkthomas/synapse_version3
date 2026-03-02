@@ -1,5 +1,5 @@
-import { useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useCallback, useMemo } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useGraphContext } from '../../hooks/useGraphContext'
 import { useGraphData } from '../../hooks/useGraphData'
 import { fetchEntityCluster } from '../../services/graphQueries'
@@ -168,7 +168,16 @@ function ErrorState({ onRetry }: { onRetry: () => void }) {
   )
 }
 
+interface AskNavState {
+  filterNodeIds?: string[]
+  filterEdgeIds?: string[]
+  fromAsk?: boolean
+  queryText?: string
+}
+
 export function GraphTab() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const {
     graphScope,
     setGraphScope,
@@ -184,6 +193,26 @@ export function GraphTab() {
   } = useGraphContext()
 
   const { data, loading, error, refetch } = useGraphData(graphScope)
+
+  // Ask filter state — set when navigating from ExploreButton in Ask view
+  const askState = (location.state ?? {}) as AskNavState
+  const isAskFiltered = !!(askState.fromAsk && (askState.filterNodeIds?.length ?? 0) > 0)
+
+  const filteredData = useMemo(() => {
+    if (!data || !isAskFiltered) return data
+    const nodeSet = new Set(askState.filterNodeIds ?? [])
+    const edgeSet = new Set(askState.filterEdgeIds ?? [])
+    return {
+      ...data,
+      anchors: data.anchors.filter(a => nodeSet.has(a.id)),
+      sources: data.sources.filter(s =>
+        // Keep sources connected to any filtered anchor via graph edges
+        data.edges.some(e => edgeSet.has(`${e.sourceId}:${e.anchorId}`) || nodeSet.has(e.anchorId) && s.id === e.sourceId)
+      ),
+      edges: data.edges.filter(e => nodeSet.has(e.anchorId)),
+      stats: data.stats,
+    }
+  }, [data, isAskFiltered, askState.filterNodeIds, askState.filterEdgeIds])
 
   const handleScopeChange = useCallback((scope: GraphScope) => {
     setGraphScope(scope)
@@ -245,12 +274,72 @@ export function GraphTab() {
     clearRightPanel()
   }, [setSelectedNodeId, clearRightPanel])
 
-  const isEmpty = data && data.sources.length === 0 && data.anchors.length === 0
+  const displayData = filteredData ?? data
+  const isEmpty = displayData && displayData.sources.length === 0 && displayData.anchors.length === 0
   const hasSources = (data?.sources.length ?? 0) > 0
   const hasAnchors = (data?.anchors.length ?? 0) > 0
 
   return (
     <div className="flex flex-col h-full" style={{ background: 'var(--color-bg-content)' }}>
+      {/* Ask filter banner */}
+      {isAskFiltered && (
+        <div
+          className="flex items-center shrink-0 font-body"
+          style={{
+            padding: '6px 16px',
+            background: 'var(--color-accent-50)',
+            borderBottom: '1px solid rgba(214,58,0,0.15)',
+            gap: 8,
+          }}
+        >
+          <span style={{ fontSize: 11, color: 'var(--color-accent-500)', fontWeight: 600 }}>
+            Filtered from Ask
+          </span>
+          {askState.queryText && (
+            <span
+              style={{
+                fontSize: 11,
+                color: 'var(--color-text-secondary)',
+                flex: 1,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              "{askState.queryText}"
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => navigate('/ask')}
+            className="font-body font-semibold cursor-pointer shrink-0"
+            style={{
+              fontSize: 11,
+              color: 'var(--color-accent-500)',
+              background: 'none',
+              border: 'none',
+              padding: 0,
+            }}
+          >
+            ← Back to Ask
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/explore', { state: {}, replace: true })}
+            className="font-body font-semibold cursor-pointer shrink-0"
+            style={{
+              fontSize: 11,
+              color: 'var(--color-text-secondary)',
+              background: 'none',
+              border: 'none',
+              padding: 0,
+            }}
+          >
+            Clear filter
+          </button>
+        </div>
+      )}
+
       {/* Scope selector bar */}
       <div
         className="flex items-center shrink-0 gap-3"
@@ -323,7 +412,7 @@ export function GraphTab() {
           </>
         )}
 
-        {!loading && !error && data && (
+        {!loading && !error && displayData && (
           <>
             {isEmpty ? (
               <div style={{ background: '#f7f7f7', width: '100%', height: '100%' }}>
@@ -331,7 +420,7 @@ export function GraphTab() {
               </div>
             ) : (
               <GraphCanvas
-                data={data}
+                data={displayData}
                 scope={graphScope}
                 expandedNodeId={expandedNodeId}
                 selectedNodeId={selectedNodeId}
@@ -343,11 +432,11 @@ export function GraphTab() {
             )}
 
             {/* Stats overlay — always show when data loaded */}
-            {data.stats && (
+            {displayData.stats && (
               <StatsOverlay
-                sourceCount={data.stats.sourceCount}
-                anchorCount={data.stats.anchorCount}
-                edgeCount={data.stats.edgeCount}
+                sourceCount={displayData.stats.sourceCount}
+                anchorCount={displayData.stats.anchorCount}
+                edgeCount={displayData.stats.edgeCount}
               />
             )}
 

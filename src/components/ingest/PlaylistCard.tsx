@@ -10,7 +10,7 @@ interface PlaylistCardProps {
   onRefreshVideos: (playlistId: string) => Promise<YouTubeVideo[]>
   onQueueVideos: (videos: YouTubeVideo[], playlistId: string) => Promise<number>
   onUpdateSettings: (playlistId: string, settings: Partial<PlaylistSettings>) => void
-  onToggleStatus?: (playlistId: string, status: 'active' | 'paused') => void
+  onToggleStatus: (playlistId: string) => Promise<void>
 }
 
 export function PlaylistCard({
@@ -19,6 +19,7 @@ export function PlaylistCard({
   onRefreshVideos,
   onQueueVideos,
   onUpdateSettings,
+  onToggleStatus,
 }: PlaylistCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [videos, setVideos] = useState<YouTubeVideo[]>([])
@@ -147,13 +148,13 @@ export function PlaylistCard({
                 width: 6,
                 height: 6,
                 borderRadius: '50%',
-                background: playlist.status === 'active'
+                background: playlist.is_active
                   ? 'var(--color-semantic-green-500)'
                   : 'var(--color-text-secondary)',
               }}
             />
             <span className="font-body" style={{ fontSize: 10, color: 'var(--color-text-secondary)' }}>
-              {playlist.status === 'active' ? 'Active' : 'Paused'}
+              {playlist.is_active ? 'Active' : 'Paused'}
             </span>
           </div>
 
@@ -271,11 +272,9 @@ export function PlaylistCard({
             <SectionLabel>Actions</SectionLabel>
             <div style={{ display: 'flex', gap: 8 }}>
               <ActionButton
-                icon={playlist.status === 'active' ? <Pause size={12} /> : <Play size={12} />}
-                label={playlist.status === 'active' ? 'Pause' : 'Resume'}
-                onClick={() => {
-                  // Toggle status — simplified without a dedicated API call
-                }}
+                icon={playlist.is_active ? <Pause size={12} /> : <Play size={12} />}
+                label={playlist.is_active ? 'Pause' : 'Resume'}
+                onClick={() => void onToggleStatus(playlist.id)}
               />
               <ActionButton
                 icon={<RefreshCw size={12} />}

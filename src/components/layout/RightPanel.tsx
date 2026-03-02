@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { Anchor, Clock } from 'lucide-react'
 import { useGraphContext } from '../../hooks/useGraphContext'
@@ -10,6 +10,21 @@ import { NodeDetail } from '../panels/NodeDetail'
 import { SourceDetail } from '../panels/SourceDetail'
 import { AskRightPanel } from '../ask/AskRightPanel'
 import type { KnowledgeNode } from '../../types/database'
+
+const MIN_WIDTH = 240
+const MAX_WIDTH = 560
+const DEFAULT_WIDTH = 310
+
+function loadWidth(): number {
+  try {
+    const v = localStorage.getItem('rightPanelWidth')
+    if (v) {
+      const n = parseInt(v, 10)
+      if (n >= MIN_WIDTH && n <= MAX_WIDTH) return n
+    }
+  } catch { /* ignore */ }
+  return DEFAULT_WIDTH
+}
 
 function formatRelativeTime(dateStr: string): string {
   const now = Date.now()
@@ -121,7 +136,48 @@ export function RightPanel() {
   const { rightPanelContent, clearRightPanel, askContext, setRightPanelContent } = useGraphContext()
   const isAskView = location.pathname === '/ask'
 
-  // Back-to-context handler for Ask view
+  // ── Resizable width ────────────────────────────────────────────────────
+  const [panelWidth, setPanelWidth] = useState(loadWidth)
+  const isDragging = useRef(false)
+  const dragStartX = useRef(0)
+  const dragStartW = useRef(0)
+  const handleRef = useRef<HTMLDivElement>(null)
+
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      isDragging.current = true
+      dragStartX.current = e.clientX
+      dragStartW.current = panelWidth
+      document.body.style.cursor = 'ew-resize'
+      document.body.style.userSelect = 'none'
+
+      const onMove = (ev: MouseEvent) => {
+        if (!isDragging.current) return
+        // Left edge drag: moving left (smaller clientX) → increase width
+        const delta = dragStartX.current - ev.clientX
+        const next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, dragStartW.current + delta))
+        setPanelWidth(next)
+        try { localStorage.setItem('rightPanelWidth', String(next)) } catch { /* ignore */ }
+      }
+
+      const onUp = () => {
+        isDragging.current = false
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+        if (handleRef.current) handleRef.current.style.background = 'transparent'
+        document.removeEventListener('mousemove', onMove)
+        document.removeEventListener('mouseup', onUp)
+      }
+
+      document.addEventListener('mousemove', onMove)
+      document.addEventListener('mouseup', onUp)
+    },
+    [panelWidth],
+  )
+
+  // ── Content ────────────────────────────────────────────────────────────
+
   const handleBackToAskContext = () => {
     if (askContext) {
       setRightPanelContent({ type: 'ask_context', data: askContext })
@@ -182,7 +238,6 @@ export function RightPanel() {
         </div>
       )
     }
-    // Ask view default state — if no context yet, show placeholder message
     if (isAskView) {
       return (
         <div className="flex flex-col gap-3">
@@ -210,23 +265,44 @@ export function RightPanel() {
     <aside
       className="flex flex-col h-screen shrink-0 overflow-hidden"
       style={{
-        width: 310,
+        width: panelWidth,
         background: 'var(--color-bg-card)',
         borderLeft: '1px solid var(--border-subtle)',
+        position: 'relative',
       }}
     >
+      {/* Drag handle — 4px strip on left edge */}
+      <div
+        ref={handleRef}
+        onMouseDown={handleMouseDown}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: 4,
+          height: '100%',
+          cursor: 'ew-resize',
+          zIndex: 10,
+          background: 'transparent',
+          transition: 'background 0.15s ease',
+        }}
+        onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = 'rgba(214,58,0,0.18)' }}
+        onMouseLeave={e => {
+          if (!isDragging.current) (e.currentTarget as HTMLDivElement).style.background = 'transparent'
+        }}
+      />
+
+      {/* Panel header */}
       <div
         className="shrink-0 px-4 flex items-center"
-        style={{
-          height: 50,
-          borderBottom: '1px solid var(--border-subtle)',
-        }}
+        style={{ height: 50, borderBottom: '1px solid var(--border-subtle)' }}
       >
         <span className="font-display text-[12px] font-bold text-text-secondary uppercase tracking-[0.06em]">
           {panelTitle()}
         </span>
       </div>
 
+      {/* Scrollable content */}
       <div
         className="flex-1 overflow-y-auto"
         style={{

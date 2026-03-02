@@ -51,14 +51,16 @@ export async function extractTextFromFile(file: File): Promise<string> {
   }
 }
 
-// --- PDF Extraction (dynamic CDN import) ---
+// --- PDF Extraction (pdfjs-dist npm package) ---
 
 async function extractPDFText(file: File): Promise<string> {
-  // Dynamically load pdf.js from CDN
-  // @ts-expect-error — dynamic CDN import has no type declarations
-  const pdfjsLib = await import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.mjs')
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.mjs'
+  const pdfjsLib = await import('pdfjs-dist')
+
+  // Configure worker — resolved at runtime, not build time
+  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+    /* @vite-ignore */ 'pdfjs-dist/build/pdf.worker.mjs',
+    import.meta.url
+  ).toString()
 
   const arrayBuffer = await file.arrayBuffer()
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
@@ -68,7 +70,7 @@ async function extractPDFText(file: File): Promise<string> {
     const page = await pdf.getPage(i)
     const textContent = await page.getTextContent()
     const pageText = textContent.items
-      .map((item: { str: string }) => item.str)
+      .map((item) => ('str' in item ? item.str : ''))
       .join(' ')
     textParts.push(pageText)
   }

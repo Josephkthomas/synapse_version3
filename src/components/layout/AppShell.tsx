@@ -41,7 +41,10 @@ export function AppShell() {
         />
 
         <main className="flex-1 h-full overflow-hidden flex flex-col min-w-0">
-          <TopBar onOpenSettings={() => setSettingsOpen(true)} />
+          <TopBar
+            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+          />
           <div className="flex-1 overflow-hidden">
             <Outlet />
           </div>

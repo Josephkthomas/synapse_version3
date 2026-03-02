@@ -6,6 +6,7 @@ import {
   getConnectedPlaylists,
   updatePlaylistSettings as updatePlaylistSettingsDB,
   disconnectPlaylist as disconnectPlaylistDB,
+  togglePlaylistStatus as togglePlaylistStatusDB,
   queueVideosForProcessing,
   getQueueStats,
 } from '../services/supabase'
@@ -18,6 +19,7 @@ export interface UseYouTubePlaylistsReturn {
   queueStats: QueueStats
   connectPlaylist: (url: string) => Promise<void>
   disconnectPlaylist: (id: string) => Promise<void>
+  toggleStatus: (id: string) => Promise<void>
   refreshVideos: (playlistId: string) => Promise<YouTubeVideo[]>
   queueVideos: (videos: YouTubeVideo[], playlistId: string) => Promise<number>
   updateSettings: (playlistId: string, settings: Partial<PlaylistSettings>) => void
@@ -84,6 +86,29 @@ export function useYouTubePlaylists(): UseYouTubePlaylistsReturn {
       setError(msg)
     }
   }, [])
+
+  const toggleStatus = useCallback(async (id: string) => {
+    const playlist = playlists.find(p => p.id === id)
+    if (!playlist) return
+
+    const newIsActive = !playlist.is_active
+
+    // Optimistic update
+    setPlaylists(prev =>
+      prev.map(p => (p.id === id ? { ...p, is_active: newIsActive } : p))
+    )
+
+    try {
+      await togglePlaylistStatusDB(id, newIsActive)
+    } catch (err) {
+      // Revert on failure
+      setPlaylists(prev =>
+        prev.map(p => (p.id === id ? { ...p, is_active: playlist.is_active } : p))
+      )
+      const msg = err instanceof Error ? err.message : 'Failed to toggle playlist status'
+      setError(msg)
+    }
+  }, [playlists])
 
   const refreshVideos = useCallback(async (playlistId: string): Promise<YouTubeVideo[]> => {
     try {
@@ -162,6 +187,7 @@ export function useYouTubePlaylists(): UseYouTubePlaylistsReturn {
     queueStats,
     connectPlaylist,
     disconnectPlaylist,
+    toggleStatus,
     refreshVideos,
     queueVideos,
     updateSettings,

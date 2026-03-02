@@ -145,7 +145,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { data: playlists, error: playlistsError } = await supabase
       .from('youtube_playlists')
       .select('*')
-      .eq('status', 'active');
+      .eq('is_active', true);
 
     if (playlistsError) {
       return res.status(500).json({ error: playlistsError.message });
@@ -285,12 +285,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           console.error(`[poll-playlist] Playlist ${playlist.playlist_id} error:`, err);
           summary.errors.push(`Playlist ${playlist.playlist_name ?? playlist.playlist_id}: ${msg}`);
 
-          // Mark playlist as errored if repeated failures
+          // Mark playlist as inactive on repeated failures
           await supabase
             .from('youtube_playlists')
-            .update({ status: 'error' })
+            .update({ is_active: false, connection_error: msg })
             .eq('id', playlist.id)
-            .eq('status', 'active'); // only update if still active
+            .eq('is_active', true); // only update if still active
         }
       }
     }
