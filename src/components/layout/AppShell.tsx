@@ -14,7 +14,8 @@ export function AppShell() {
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   const isAskView = location.pathname === '/ask'
-  const showRightPanel = isAskView || rightPanelContent !== null
+  // Ask view has its own internal right panel, so skip the AppShell one
+  const showRightPanel = !isAskView && rightPanelContent !== null
 
   // Global keyboard listener
   useEffect(() => {

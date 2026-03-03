@@ -5,6 +5,7 @@ import type { UserProfile } from './database'
 export type ExtractionStep =
   | 'idle'
   | 'saving_source'
+  | 'summarizing'
   | 'composing_prompt'
   | 'extracting'
   | 'reviewing'

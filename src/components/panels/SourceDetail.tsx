@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
-import { X, RefreshCw } from 'lucide-react'
+import { useEffect, useState, useRef } from 'react'
+import { X, RefreshCw, Loader2 } from 'lucide-react'
 import { SectionLabel } from '../ui/SectionLabel'
 import { getEntityColor } from '../../config/entityTypes'
 import { getSourceConfig } from '../../config/sourceTypes'
 import { supabase, fetchNodeById, fetchCrossConnectionsForSource } from '../../services/supabase'
 import { useGraphContext } from '../../hooks/useGraphContext'
+import { resolveSummary } from '../../utils/summarize'
 import type { KnowledgeSource, KnowledgeNode } from '../../types/database'
 import type { CrossConnection } from '../../types/feed'
 
@@ -28,13 +29,36 @@ interface SourceDetailProps {
   onClose?: () => void
 }
 
+const PROVENANCE_LABELS: Record<string, string> = {
+  extracted: 'From source',
+  generated: 'AI generated',
+  user: 'Edited',
+  truncated: 'Preview',
+}
+
 export function SourceDetail({ source, onClose }: SourceDetailProps) {
   const { setRightPanelContent } = useGraphContext()
   const [entities, setEntities] = useState<KnowledgeNode[]>([])
   const [loadingEntities, setLoadingEntities] = useState(true)
   const [crossConnections, setCrossConnections] = useState<CrossConnection[]>([])
 
+  // Summary state
+  const [currentSummary, setCurrentSummary] = useState<string | null>(source.summary ?? null)
+  const [currentSummarySource, setCurrentSummarySource] = useState<string | null>(source.summary_source ?? null)
+  const [isEditingSummary, setIsEditingSummary] = useState(false)
+  const [draftSummary, setDraftSummary] = useState('')
+  const [generationStatus, setGenerationStatus] = useState<'idle' | 'generating' | 'error'>('idle')
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
   const cfg = getSourceConfig(source.source_type)
+
+  // Reset summary state when source changes
+  useEffect(() => {
+    setCurrentSummary(source.summary ?? null)
+    setCurrentSummarySource(source.summary_source ?? null)
+    setIsEditingSummary(false)
+    setGenerationStatus('idle')
+  }, [source.id, source.summary, source.summary_source])
 
   useEffect(() => {
     setLoadingEntities(true)
@@ -65,8 +89,58 @@ export function SourceDetail({ source, onClose }: SourceDetailProps) {
     if (node) setRightPanelContent({ type: 'node', data: node })
   }
 
-  const summary = (source.metadata as Record<string, unknown> | null)?.summary as string | null
-  const contentPreview = source.content?.slice(0, 300) ?? null
+  // Summary edit handlers
+  const handleEditStart = () => {
+    setDraftSummary(currentSummary ?? '')
+    setIsEditingSummary(true)
+    setTimeout(() => textareaRef.current?.focus(), 50)
+  }
+
+  const handleEditSave = async () => {
+    const trimmed = draftSummary.trim()
+    if (!trimmed) return
+    const { error } = await supabase
+      .from('knowledge_sources')
+      .update({ summary: trimmed, summary_source: 'user' })
+      .eq('id', source.id)
+    if (!error) {
+      setCurrentSummary(trimmed)
+      setCurrentSummarySource('user')
+    }
+    setIsEditingSummary(false)
+  }
+
+  const handleEditCancel = () => {
+    setIsEditingSummary(false)
+  }
+
+  const handleGenerateSummary = async () => {
+    setGenerationStatus('generating')
+    try {
+      const result = await resolveSummary(
+        source.source_type ?? null,
+        source.content ?? null,
+        source.metadata ?? null,
+      )
+      if (result) {
+        const { error } = await supabase
+          .from('knowledge_sources')
+          .update({ summary: result.summary, summary_source: result.source })
+          .eq('id', source.id)
+        if (!error) {
+          setCurrentSummary(result.summary)
+          setCurrentSummarySource(result.source)
+        }
+      }
+      setGenerationStatus('idle')
+    } catch {
+      setGenerationStatus('error')
+    }
+  }
+
+  const contentPreview = source.content
+    ? source.content.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180) + '...'
+    : null
 
   return (
     <div className="flex flex-col gap-5">
@@ -117,25 +191,176 @@ export function SourceDetail({ source, onClose }: SourceDetailProps) {
         )}
       </div>
 
-      {/* Summary / content preview */}
-      {(summary || contentPreview) && (
-        <div>
-          <SectionLabel>Summary</SectionLabel>
-          <p
-            className="font-body mt-2 leading-relaxed"
-            style={{
-              fontSize: 13,
-              color: 'var(--color-text-body)',
-              display: '-webkit-box',
-              WebkitLineClamp: 6,
-              WebkitBoxOrient: 'vertical',
-              overflow: 'hidden',
-            }}
-          >
-            {summary ?? contentPreview}
-          </p>
+      {/* Summary section */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <SectionLabel>Summary</SectionLabel>
+            {currentSummary && currentSummarySource && (
+              <span
+                className="font-body"
+                style={{
+                  fontSize: 10,
+                  fontWeight: 500,
+                  color: 'var(--color-text-secondary)',
+                  background: 'var(--color-bg-inset)',
+                  borderRadius: 4,
+                  padding: '2px 6px',
+                }}
+              >
+                {PROVENANCE_LABELS[currentSummarySource] ?? currentSummarySource}
+              </span>
+            )}
+          </div>
+          {currentSummary && !isEditingSummary && (
+            <button
+              type="button"
+              onClick={handleEditStart}
+              className="font-body cursor-pointer"
+              style={{
+                fontSize: 11,
+                color: 'var(--color-accent-500)',
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                textDecoration: 'none',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.textDecoration = 'underline' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.textDecoration = 'none' }}
+            >
+              Edit
+            </button>
+          )}
         </div>
-      )}
+
+        {isEditingSummary ? (
+          <div>
+            <textarea
+              ref={textareaRef}
+              value={draftSummary}
+              onChange={e => setDraftSummary(e.target.value)}
+              className="font-body w-full"
+              style={{
+                fontSize: 13,
+                color: 'var(--color-text-body)',
+                background: 'var(--color-bg-inset)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 8,
+                padding: '8px 10px',
+                resize: 'vertical',
+                minHeight: 80,
+                maxHeight: 200,
+                lineHeight: 1.5,
+                outline: 'none',
+              }}
+              onFocus={e => { (e.currentTarget as HTMLTextAreaElement).style.borderColor = 'rgba(214,58,0,0.3)' }}
+              onBlur={e => { (e.currentTarget as HTMLTextAreaElement).style.borderColor = 'var(--border-subtle)' }}
+            />
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                type="button"
+                onClick={handleEditSave}
+                className="font-body font-semibold cursor-pointer"
+                style={{
+                  fontSize: 11,
+                  padding: '5px 14px',
+                  borderRadius: 6,
+                  background: 'var(--color-bg-inset)',
+                  border: '1px solid var(--border-default)',
+                  color: 'var(--color-text-body)',
+                }}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={handleEditCancel}
+                className="font-body cursor-pointer"
+                style={{
+                  fontSize: 11,
+                  padding: '5px 14px',
+                  borderRadius: 6,
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--color-text-secondary)',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : currentSummary ? (
+          <p
+            className="font-body leading-relaxed"
+            style={{ fontSize: 13, color: 'var(--color-text-body)' }}
+          >
+            {currentSummary}
+          </p>
+        ) : contentPreview ? (
+          <div>
+            <p
+              className="font-body leading-relaxed"
+              style={{
+                fontSize: 13,
+                color: 'var(--color-text-secondary)',
+                fontStyle: 'italic',
+              }}
+            >
+              {contentPreview}
+            </p>
+            <button
+              type="button"
+              onClick={handleGenerateSummary}
+              disabled={generationStatus === 'generating'}
+              className="font-body cursor-pointer mt-2 inline-flex items-center gap-1.5"
+              style={{
+                fontSize: 11,
+                color: 'var(--color-accent-500)',
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                opacity: generationStatus === 'generating' ? 0.6 : 1,
+              }}
+            >
+              {generationStatus === 'generating' ? (
+                <>
+                  <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                  Generating...
+                </>
+              ) : (
+                'Generate summary'
+              )}
+            </button>
+            {generationStatus === 'error' && (
+              <p className="font-body mt-1" style={{ fontSize: 11, color: 'var(--color-semantic-red-500)' }}>
+                Summary generation failed —{' '}
+                <button
+                  type="button"
+                  onClick={handleGenerateSummary}
+                  className="font-body cursor-pointer"
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--color-accent-500)',
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    textDecoration: 'underline',
+                  }}
+                >
+                  Retry
+                </button>
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="font-body" style={{ fontSize: 12, color: 'var(--color-text-placeholder)' }}>
+            No content available
+          </p>
+        )}
+      </div>
+
+      {/* Divider below summary */}
+      <div style={{ borderBottom: '1px solid var(--border-subtle)' }} />
 
       {/* Extracted entities */}
       <div>

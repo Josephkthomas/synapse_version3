@@ -64,7 +64,7 @@ export async function fetchActivityFeed(
   // Step 1: Fetch sources (limit+1 to detect hasMore)
   const { data: rawSources, error: sourcesError } = await supabase
     .from('knowledge_sources')
-    .select('id, title, source_type, source_url, content, metadata, created_at, user_id')
+    .select('id, title, source_type, source_url, content, metadata, created_at, user_id, summary, summary_source')
     .order('created_at', { ascending: false })
     .range(offset, offset + limit)
 
@@ -264,12 +264,16 @@ export async function fetchActivityFeed(
       }
     }
 
+    // Prefer DB summary column; fall back to metadata.summary; then content truncation
     const metadata = source.metadata as Record<string, unknown> | null
     const summary =
+      (source as KnowledgeSource & { summary?: string | null }).summary ??
       (metadata?.summary as string | null) ??
-      (source.content ? source.content.slice(0, 200) + '...' : null)
+      (source.content ? source.content.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180) + '...' : null)
 
-    return { source, entityCount, relationCount, entities, withinSourceConnections, crossConnections, summary }
+    const isFallbackSummary = !(source as KnowledgeSource & { summary?: string | null }).summary && !(metadata?.summary as string | null)
+
+    return { source, entityCount, relationCount, entities, withinSourceConnections, crossConnections, summary, isFallbackSummary }
   })
 
   return { items, hasMore }

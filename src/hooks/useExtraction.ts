@@ -9,6 +9,7 @@ import type {
 import { useAuth } from './useAuth'
 import { buildExtractionPrompt } from '../utils/promptBuilder'
 import { chunkSourceContent } from '../utils/chunking'
+import { resolveSummary } from '../utils/summarize'
 import { extractEntities, generateEmbeddings } from '../services/gemini'
 import {
   saveSource,
@@ -18,7 +19,7 @@ import {
   saveChunks,
   saveExtractionSession,
 } from '../services/extractionPersistence'
-import { checkDuplicateNodes } from '../services/supabase'
+import { checkDuplicateNodes, supabase } from '../services/supabase'
 import { discoverCrossConnections, saveCrossConnectionEdges } from '../services/crossConnections'
 
 const INITIAL_STATE: PipelineState = {
@@ -96,7 +97,28 @@ export function useExtraction(): UseExtractionReturn {
         sourceIdRef.current = sourceId
         update({ sourceId })
 
-        // Step 2: Compose prompt
+        // Step 2: Summarize (non-blocking — failures don't halt pipeline)
+        update({ step: 'summarizing', statusText: 'Generating summary...' })
+        try {
+          const summaryResult = await resolveSummary(
+            metadata.sourceType,
+            content,
+            null // metadata from source row not available yet; extraction metadata is minimal
+          )
+          if (summaryResult) {
+            await supabase
+              .from('knowledge_sources')
+              .update({
+                summary: summaryResult.summary,
+                summary_source: summaryResult.source,
+              })
+              .eq('id', sourceId)
+          }
+        } catch (summaryErr) {
+          console.warn('[useExtraction] Summary generation failed (non-blocking):', summaryErr)
+        }
+
+        // Step 3: Compose prompt
         update({ step: 'composing_prompt', statusText: 'Composing extraction prompt...' })
         const systemPrompt = buildExtractionPrompt(config)
 

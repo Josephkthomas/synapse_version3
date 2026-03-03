@@ -206,16 +206,6 @@ export function ExploreView() {
 
   return (
     <div className="flex flex-col h-full" style={{ background: 'var(--color-bg-content)' }}>
-      {/* Page title */}
-      <div style={{ padding: '20px 24px 0', flexShrink: 0 }}>
-        <h1
-          className="font-display font-extrabold text-text-primary"
-          style={{ fontSize: 26, letterSpacing: '-0.02em', margin: 0 }}
-        >
-          Explore
-        </h1>
-      </div>
-
       <ExploreToolbar {...toolbarProps} clusters={toolbarClusters} />
 
       {loading ? (

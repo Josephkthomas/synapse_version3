@@ -220,9 +220,9 @@ export function BrowseTab({ viewMode, onTotalCountChange }: BrowseTabProps) {
           )}
         </div>
 
-        <FilterDrop label="Entity Type" options={entityTypes} selected={entityTypeFilter} onToggle={handleToggle(setEntityTypeFilter)} colorMap={ENTITY_TYPE_COLORS} iconMap={null} isOpen={openDropdown === 'entityType'} onOpenChange={open => setOpenDropdown(open ? 'entityType' : null)} />
-        <FilterDrop label="Source" options={sourceTypes} selected={sourceTypeFilter} onToggle={handleToggle(setSourceTypeFilter)} colorMap={null} iconMap={SOURCE_EMOJI} isOpen={openDropdown === 'source'} onOpenChange={open => setOpenDropdown(open ? 'source' : null)} />
-        <FilterDrop label="Anchor" options={anchorOptions} selected={anchorFilter} onToggle={handleToggle(setAnchorFilter)} colorMap={null} iconMap={null} isOpen={openDropdown === 'anchor'} onOpenChange={open => setOpenDropdown(open ? 'anchor' : null)} />
+        <FilterDrop label="Entity Types" options={entityTypes} selected={entityTypeFilter} onToggle={handleToggle(setEntityTypeFilter)} colorMap={ENTITY_TYPE_COLORS} iconMap={null} isOpen={openDropdown === 'entityType'} onOpenChange={open => setOpenDropdown(open ? 'entityType' : null)} />
+        <FilterDrop label="Source Types" options={sourceTypes} selected={sourceTypeFilter} onToggle={handleToggle(setSourceTypeFilter)} colorMap={null} iconMap={SOURCE_EMOJI} isOpen={openDropdown === 'source'} onOpenChange={open => setOpenDropdown(open ? 'source' : null)} />
+        <FilterDrop label="Anchors" options={anchorOptions} selected={anchorFilter} onToggle={handleToggle(setAnchorFilter)} colorMap={null} iconMap={null} isOpen={openDropdown === 'anchor'} onOpenChange={open => setOpenDropdown(open ? 'anchor' : null)} />
         <FilterDrop label="Tags" options={tags} selected={tagFilter} onToggle={handleToggle(setTagFilter)} colorMap={null} iconMap={null} isOpen={openDropdown === 'tag'} onOpenChange={open => setOpenDropdown(open ? 'tag' : null)} />
         <ConfidenceSlider value={confidenceMin} onChange={setConfidenceMin} />
       </div>

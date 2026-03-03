@@ -1,5 +1,5 @@
 import {
-  Save, FileText, Sparkles, Eye, Database, Cpu, Scissors, Zap, Check, X,
+  Save, AlignLeft, FileText, Sparkles, Eye, Database, Cpu, Scissors, Zap, Check, X,
 } from 'lucide-react'
 import type { ExtractionStep } from '../../types/extraction'
 
@@ -15,6 +15,7 @@ interface ExtractionProgressProps {
 
 const PIPELINE_STEPS = [
   { key: 'saving_source', label: 'Saving source', Icon: Save },
+  { key: 'summarizing', label: 'Summarizing', Icon: AlignLeft },
   { key: 'composing_prompt', label: 'Composing prompt', Icon: FileText },
   { key: 'extracting', label: 'Extracting entities', Icon: Sparkles },
   { key: 'reviewing', label: 'Reviewing', Icon: Eye },

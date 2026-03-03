@@ -28,23 +28,17 @@ export function GreetingHeader({ stats, loading, error }: GreetingHeaderProps) {
   const renderStatsLine = () => {
     if (loading) {
       return (
-        <div className="flex gap-3 mt-1">
-          {[120, 90, 110].map(w => (
-            <div
-              key={w}
-              className="rounded animate-pulse"
-              style={{ width: w, height: 13, background: 'var(--color-bg-inset)' }}
-            />
-          ))}
-        </div>
+        <span className="font-body" style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
+          Loading…
+        </span>
       )
     }
 
     if (error || !stats) {
       return (
-        <p className="font-body mt-1" style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>
+        <span className="font-body" style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
           — sources · — entities · — relationships
-        </p>
+        </span>
       )
     }
 
@@ -54,31 +48,32 @@ export function GreetingHeader({ stats, loading, error }: GreetingHeaderProps) {
       stats.relationshipsDiscovered === 0
     ) {
       return (
-        <p className="font-body mt-1" style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>
-          No activity yet today — ready when you are.
-        </p>
+        <span className="font-body" style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
+          No activity yet today
+        </span>
       )
     }
 
     return (
-      <p className="font-body mt-1" style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>
-        {stats.sourcesProcessed} sources processed today
+      <span className="font-body" style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
+        {stats.sourcesProcessed} sources today
         {' · '}
         {stats.newEntities} new entities
         {' · '}
-        {stats.relationshipsDiscovered} relationships discovered
-      </p>
+        {stats.relationshipsDiscovered} relationships
+      </span>
     )
   }
 
   return (
-    <div style={{ marginBottom: 24 }}>
-      <h1
-        className="font-display font-extrabold text-text-primary"
-        style={{ fontSize: 26, letterSpacing: '-0.02em' }}
+    <div className="flex items-center gap-3" style={{ minHeight: 28 }}>
+      <span
+        className="font-body font-semibold text-text-primary shrink-0"
+        style={{ fontSize: 12 }}
       >
         {getGreeting()}, {name}
-      </h1>
+      </span>
+      <div style={{ width: 1, height: 24, background: 'var(--border-subtle)', flexShrink: 0 }} />
       {renderStatsLine()}
     </div>
   )

@@ -656,3 +656,35 @@ export async function triggerManualScan(
     if (error) throw new Error(error.message)
   }
 }
+
+// ─── Immediate Scan (calls poll-playlist API directly) ────────────────────────
+
+export async function callScanNowAPI(
+  authToken: string
+): Promise<{ newVideosQueued: number; playlistsPolled: number }> {
+  const res = await fetch('/api/youtube/poll-playlist', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Scan failed' })) as { error?: string }
+    throw new Error(err.error ?? `Scan failed: ${res.status}`)
+  }
+  return res.json() as Promise<{ newVideosQueued: number; playlistsPolled: number }>
+}
+
+// ─── Immediate Process (calls process API directly) ───────────────────────────
+
+export async function callProcessNowAPI(
+  authToken: string
+): Promise<{ processed: number }> {
+  const res = await fetch('/api/youtube/process', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Processing failed' })) as { error?: string }
+    throw new Error(err.error ?? `Processing failed: ${res.status}`)
+  }
+  return res.json() as Promise<{ processed: number }>
+}

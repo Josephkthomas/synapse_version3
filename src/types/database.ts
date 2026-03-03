@@ -51,6 +51,8 @@ export interface KnowledgeSource {
   source_type?: string | null
   source_url?: string | null
   metadata?: Record<string, unknown> | null
+  summary?: string | null
+  summary_source?: string | null // 'extracted' | 'generated' | 'user' | 'truncated'
   created_at: string
 }
 

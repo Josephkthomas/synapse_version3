@@ -5,6 +5,8 @@ import { ExploreView } from '../views/ExploreView'
 import { AskView } from '../views/AskView'
 import { CaptureView } from '../views/CaptureView'
 import { AutomateView } from '../views/AutomateView'
+import { OrientView } from '../views/OrientView'
+import { PipelineView } from '../views/PipelineView'
 
 const router = createBrowserRouter([
   {
@@ -16,6 +18,8 @@ const router = createBrowserRouter([
       { path: '/capture', element: <CaptureView /> },
       { path: '/ingest', element: <Navigate to="/capture" replace /> },
       { path: '/automate', element: <AutomateView /> },
+      { path: '/orient', element: <OrientView /> },
+      { path: '/pipeline', element: <PipelineView /> },
       { path: '*', element: <Navigate to="/" replace /> },
     ],
   },

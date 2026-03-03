@@ -81,6 +81,7 @@ export interface EnrichedChunk {
   sourceTitle: string
   sourceType: string
   sourceCreatedAt: string
+  sourceSummary?: string | null
 }
 
 export interface NodeSummary {

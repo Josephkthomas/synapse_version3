@@ -4,6 +4,7 @@ import { useAutomationSources } from '../hooks/useAutomationSources'
 import { SourceCard } from '../components/automate/SourceCard'
 import { SourceDetailPanel } from '../components/automate/SourceDetailPanel'
 import { NewSourcePanel } from '../components/automate/NewSourcePanel'
+import { BackfillCard } from '../components/automate/BackfillCard'
 import type { AutomationSource } from '../services/automationSources'
 
 type FilterType = 'all' | 'youtube-channel' | 'youtube-playlist' | 'meeting'
@@ -113,134 +114,130 @@ export function AutomateView() {
   const handleConnectClick = () => setSelectedSourceId(null)
 
   return (
-    <div
-      ref={containerRef}
-      style={{
-        height: '100%',
-        display: 'flex',
-        overflow: 'hidden',
-        userSelect: isDragging ? 'none' : undefined,
-        cursor: isDragging ? 'col-resize' : undefined,
-      }}
-    >
-      {/* ── Left column (2/3) ─────────────────────────────────────────────── */}
+    <div className="flex flex-col h-full">
+      {/* ── Control bar — full width above split ── */}
       <div
+        className="flex items-center shrink-0 flex-wrap"
         style={{
-          width: `${leftWidthPct}%`,
-          transition: isDragging ? 'none' : 'width 0.2s ease',
-          height: '100%',
-          overflowY: 'auto',
-          background: 'var(--color-bg-content)',
-          flexShrink: 0,
+          background: 'var(--color-bg-card)',
+          borderBottom: '1px solid var(--border-subtle)',
+          padding: '8px 24px',
+          minHeight: 44,
+          gap: 8,
         }}
       >
-        <div style={{ padding: '28px 36px' }}>
-
-          {/* ── Header ──────────────────────────────────────────────────── */}
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 4 }}>
-            <div>
-              <h1
-                className="font-display font-extrabold text-text-primary"
-                style={{ fontSize: 26, letterSpacing: '-0.02em', margin: 0 }}
-              >
-                Automate
-              </h1>
-              <p
-                className="font-body"
-                style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginTop: 2, marginBottom: 0 }}
-              >
-                Persistent knowledge pipelines. Content flows in automatically.
-              </p>
-            </div>
-
-            {/* Connect Source — always visible as a reminder */}
+        {/* Filter pills */}
+        {FILTERS.map(f => {
+          const isActive = filter === f.key
+          const count = filterCount(f.key)
+          return (
             <button
+              key={f.key}
               type="button"
-              onClick={handleConnectClick}
+              onClick={() => setFilter(f.key)}
               className="font-body font-semibold"
               style={{
+                padding: '5px 13px',
+                borderRadius: 20,
+                fontSize: 12,
+                border: isActive ? '1px solid rgba(214,58,0,0.15)' : '1px solid var(--border-subtle)',
+                background: isActive ? 'var(--color-accent-50)' : 'transparent',
+                color: isActive ? 'var(--color-accent-500)' : 'var(--color-text-secondary)',
+                cursor: 'pointer',
+                transition: 'all 0.15s',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 6,
-                padding: '9px 18px',
-                borderRadius: 10,
-                border: selectedSourceId === null
-                  ? '1px solid rgba(214,58,0,0.3)'
-                  : 'none',
-                background: selectedSourceId === null
-                  ? 'var(--color-accent-50)'
-                  : 'var(--color-accent-500)',
-                color: selectedSourceId === null
-                  ? 'var(--color-accent-500)'
-                  : 'white',
-                fontSize: 12,
-                cursor: 'pointer',
-                flexShrink: 0,
-                marginLeft: 16,
-                transition: 'all 0.2s',
+                gap: 5,
               }}
             >
-              <Plus size={14} />
-              Connect Source
+              {f.label}
+              <span style={{ fontSize: 9, fontWeight: 700, opacity: 0.6 }}>({count})</span>
             </button>
-          </div>
+          )
+        })}
 
-          {/* ── Stats strip ─────────────────────────────────────────────── */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, paddingTop: 12, marginBottom: 18, flexWrap: 'wrap' }}>
-            <span className="font-body" style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-              <span className="font-display" style={{ fontWeight: 700, color: 'var(--color-text-primary)' }}>
-                {activeCount}
-              </span>{' '}
-              active source{activeCount !== 1 ? 's' : ''}
-            </span>
-            {queueSummary.processing > 0 && (
-              <span className="font-body" style={{ fontSize: 12, fontWeight: 600, color: '#3b82f6' }}>
-                {queueSummary.processing} processing
-              </span>
-            )}
-            {queueSummary.pending > 0 && (
-              <span className="font-body" style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-                {queueSummary.pending} pending
-              </span>
-            )}
-            {queueSummary.failed > 0 && (
-              <span className="font-body" style={{ fontSize: 12, fontWeight: 600, color: '#ef4444' }}>
-                {queueSummary.failed} failed
-              </span>
-            )}
-          </div>
+        {/* Divider */}
+        <div style={{ width: 1, height: 24, background: 'var(--border-subtle)', flexShrink: 0 }} />
 
-          {/* ── Filter pills ─────────────────────────────────────────────── */}
-          <div style={{ display: 'flex', gap: 6, marginBottom: 24, flexWrap: 'wrap' }}>
-            {FILTERS.map(f => {
-              const isActive = filter === f.key
-              const count = filterCount(f.key)
-              return (
-                <button
-                  key={f.key}
-                  type="button"
-                  onClick={() => setFilter(f.key)}
-                  className="font-body font-semibold"
-                  style={{
-                    padding: '5px 13px',
-                    borderRadius: 20,
-                    fontSize: 11,
-                    border: isActive ? '1px solid rgba(214,58,0,0.15)' : '1px solid var(--border-subtle)',
-                    background: isActive ? 'var(--color-accent-50)' : 'transparent',
-                    color: isActive ? 'var(--color-accent-500)' : 'var(--color-text-secondary)',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 5,
-                  }}
-                >
-                  {f.label}
-                  <span style={{ fontSize: 9, fontWeight: 700, opacity: 0.6 }}>({count})</span>
-                </button>
-              )
-            })}
-          </div>
+        {/* Stats strip */}
+        <span className="font-body" style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
+          <span className="font-display" style={{ fontWeight: 700, color: 'var(--color-text-primary)' }}>
+            {activeCount}
+          </span>{' '}
+          active
+        </span>
+        {queueSummary.processing > 0 && (
+          <span className="font-body" style={{ fontSize: 12, fontWeight: 600, color: '#3b82f6' }}>
+            {queueSummary.processing} processing
+          </span>
+        )}
+        {queueSummary.pending > 0 && (
+          <span className="font-body" style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
+            {queueSummary.pending} pending
+          </span>
+        )}
+        {queueSummary.failed > 0 && (
+          <span className="font-body" style={{ fontSize: 12, fontWeight: 600, color: '#ef4444' }}>
+            {queueSummary.failed} failed
+          </span>
+        )}
+
+        <div className="flex-1" />
+
+        {/* Connect Source button */}
+        <button
+          type="button"
+          onClick={handleConnectClick}
+          className="font-body font-semibold"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '7px 14px',
+            borderRadius: 8,
+            border: selectedSourceId === null
+              ? '1px solid rgba(214,58,0,0.3)'
+              : 'none',
+            background: selectedSourceId === null
+              ? 'var(--color-accent-50)'
+              : 'var(--color-accent-500)',
+            color: selectedSourceId === null
+              ? 'var(--color-accent-500)'
+              : 'white',
+            fontSize: 12,
+            cursor: 'pointer',
+            flexShrink: 0,
+            transition: 'all 0.2s',
+          }}
+        >
+          <Plus size={14} />
+          Connect Source
+        </button>
+      </div>
+
+      <div
+        ref={containerRef}
+        className="flex flex-1 overflow-hidden"
+        style={{
+          userSelect: isDragging ? 'none' : undefined,
+          cursor: isDragging ? 'col-resize' : undefined,
+        }}
+      >
+        {/* ── Left column (2/3) ─────────────────────────────────────────────── */}
+        <div
+          style={{
+            width: `${leftWidthPct}%`,
+            transition: isDragging ? 'none' : 'width 0.2s ease',
+            height: '100%',
+            overflowY: 'auto',
+            background: 'var(--color-bg-content)',
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ padding: '20px 36px' }}>
+
+          {/* ── Backfill Card ─────────────────────────────────────────── */}
+          <BackfillCard />
 
           {/* ── Error ───────────────────────────────────────────────────── */}
           {error && (
@@ -368,6 +365,7 @@ export function AutomateView() {
             />
           )
         }
+      </div>
       </div>
     </div>
   )

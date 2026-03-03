@@ -48,6 +48,7 @@ export interface FeedItem {
   withinSourceConnections: WithinSourceConnection[]
   crossConnections: CrossConnection[]
   summary: string | null
+  isFallbackSummary: boolean
 }
 
 export interface DigestModule {

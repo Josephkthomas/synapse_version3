@@ -48,6 +48,26 @@ function verifyCronAuth(req: VercelRequest): boolean {
   return !!(auth && auth === `Bearer ${CRON_SECRET}`);
 }
 
+async function verifyUserAuth(
+  req: VercelRequest
+): Promise<{ userId: string | null; isCron: boolean }> {
+  // Check cron first
+  if (verifyCronAuth(req)) return { userId: null, isCron: true };
+
+  // Try Supabase JWT
+  const auth = req.headers['authorization'];
+  if (auth?.startsWith('Bearer ')) {
+    const token = auth.slice(7);
+    const supabase = getSupabase();
+    try {
+      const { data: { user } } = await supabase.auth.getUser(token);
+      if (user) return { userId: user.id, isCron: false };
+    } catch { /* fall through */ }
+  }
+
+  return { userId: null, isCron: false };
+}
+
 // ─── PLAYLIST API ──────────────────────────────────────────────────────────────
 
 async function fetchPlaylistItems(
@@ -129,7 +149,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (!verifyCronAuth(req)) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { userId, isCron } = await verifyUserAuth(req);
+  if (!isCron && !userId) return res.status(401).json({ error: 'Unauthorized' });
 
   const startTime = Date.now();
   const supabase = getSupabase();
@@ -141,11 +163,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   };
 
   try {
-    // Fetch all active playlists
-    const { data: playlists, error: playlistsError } = await supabase
+    // Fetch active playlists — scope to requesting user when user-triggered
+    let playlistQuery = supabase
       .from('youtube_playlists')
       .select('*')
       .eq('is_active', true);
+    if (!isCron && userId) {
+      playlistQuery = playlistQuery.eq('user_id', userId);
+    }
+    const { data: playlists, error: playlistsError } = await playlistQuery;
 
     if (playlistsError) {
       return res.status(500).json({ error: playlistsError.message });

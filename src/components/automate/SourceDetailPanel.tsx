@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react'
-import { X, Pause, RefreshCw, PlayCircle, Link, Check, Edit2, Save, ChevronDown, ChevronUp } from 'lucide-react'
+import { X, Pause, RefreshCw, PlayCircle, Link, Check, Edit2, Save, ChevronDown, ChevronUp, Zap } from 'lucide-react'
 import type { AutomationSource, QueueItemDisplay, IngestedItem, SourceSettings } from '../../services/automationSources'
 import {
   updateSourceStatus, disconnectSource, triggerManualScan,
   updateSourceSettings, fetchIngestedContent,
+  callScanNowAPI, callProcessNowAPI,
 } from '../../services/automationSources'
 import { StatusLabel, StatusDot } from '../shared/StatusIndicator'
 import { useSourceQueue } from '../../hooks/useSourceQueue'
 import { useSettings } from '../../hooks/useSettings'
+import { useAuth } from '../../hooks/useAuth'
 import { EXTRACTION_MODES, ANCHOR_EMPHASIS_LEVELS } from '../../config/extractionModes'
 import { getEntityColor } from '../../config/entityTypes'
 
@@ -425,7 +427,13 @@ export function SourceDetailPanel({ source, onClose, onRefetch }: SourceDetailPa
     source.category === 'meeting' ? null : source.id,
     source.category
   )
+  const { session } = useAuth()
   const [actionLoading, setActionLoading] = useState(false)
+  const [scanLoading, setScanLoading] = useState(false)
+  const [processLoading, setProcessLoading] = useState(false)
+  const [scanResult, setScanResult] = useState<string | null>(null)
+  const [processResult, setProcessResult] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [ingestedItems, setIngestedItems] = useState<IngestedItem[]>([])
   const [ingestedLoading, setIngestedLoading] = useState(true)
   const [showAllIngested, setShowAllIngested] = useState(false)
@@ -458,10 +466,39 @@ export function SourceDetailPanel({ source, onClose, onRefetch }: SourceDetailPa
   }
 
   const handleScanNow = async () => {
-    setActionLoading(true)
-    try { await triggerManualScan(source.id, source.category); await onRefetch() }
-    catch (err) { console.warn('[SourceDetailPanel] scan error:', err) }
-    finally { setActionLoading(false) }
+    setScanLoading(true)
+    setScanResult(null)
+    setActionError(null)
+    try {
+      if (session?.access_token) {
+        const result = await callScanNowAPI(session.access_token)
+        setScanResult(`${result.newVideosQueued} new video${result.newVideosQueued !== 1 ? 's' : ''} queued`)
+      } else {
+        await triggerManualScan(source.id, source.category)
+        setScanResult('Scan triggered')
+      }
+      await onRefetch()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Scan failed')
+    } finally {
+      setScanLoading(false)
+    }
+  }
+
+  const handleProcessNow = async () => {
+    setProcessLoading(true)
+    setProcessResult(null)
+    setActionError(null)
+    try {
+      if (!session?.access_token) throw new Error('Not authenticated')
+      const result = await callProcessNowAPI(session.access_token)
+      setProcessResult(`${result.processed} item${result.processed !== 1 ? 's' : ''} processed`)
+      await onRefetch()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Processing failed')
+    } finally {
+      setProcessLoading(false)
+    }
   }
 
   const handleDisconnect = async () => {
@@ -518,44 +555,75 @@ export function SourceDetailPanel({ source, onClose, onRefetch }: SourceDetailPa
         </div>
 
         {/* ── Quick actions ──────────────────────────────────────────── */}
-        <div style={{ display: 'flex', gap: 6, marginBottom: 24, flexWrap: 'wrap' }}>
-          {(source.status === 'active' || source.status === 'connected') && (
-            <>
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {(source.status === 'active' || source.status === 'connected') && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void handlePause()}
+                  disabled={actionLoading || source.category === 'meeting'}
+                  className="font-body font-semibold"
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--color-bg-card)', color: 'var(--color-text-body)', fontSize: 11, cursor: actionLoading || source.category === 'meeting' ? 'not-allowed' : 'pointer', opacity: source.category === 'meeting' ? 0.4 : 1 }}
+                >
+                  <Pause size={12} /> Pause
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleScanNow()}
+                  disabled={scanLoading || source.category === 'meeting'}
+                  className="font-body font-semibold"
+                  style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--color-bg-card)', color: 'var(--color-text-body)', fontSize: 11, cursor: scanLoading || source.category === 'meeting' ? 'not-allowed' : 'pointer', opacity: source.category === 'meeting' ? 0.4 : scanLoading ? 0.6 : 1 }}
+                >
+                  <RefreshCw size={12} style={{ animation: scanLoading ? 'spin 1s linear infinite' : 'none' }} />
+                  {scanLoading ? 'Scanning…' : 'Scan Now'}
+                </button>
+                {source.queue.pending > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void handleProcessNow()}
+                    disabled={processLoading}
+                    className="font-body font-semibold"
+                    style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 14px', borderRadius: 8, border: '1px solid rgba(214,58,0,0.25)', background: 'var(--color-accent-50)', color: 'var(--color-accent-500)', fontSize: 11, cursor: processLoading ? 'not-allowed' : 'pointer', opacity: processLoading ? 0.6 : 1 }}
+                  >
+                    <Zap size={12} />
+                    {processLoading ? 'Processing…' : 'Process Now'}
+                  </button>
+                )}
+              </>
+            )}
+            {source.status === 'paused' && (
               <button
                 type="button"
-                onClick={() => void handlePause()}
-                disabled={actionLoading || source.category === 'meeting'}
+                onClick={() => void handleResume()}
+                disabled={actionLoading}
                 className="font-body font-semibold"
-                style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--color-bg-card)', color: 'var(--color-text-body)', fontSize: 11, cursor: actionLoading || source.category === 'meeting' ? 'not-allowed' : 'pointer', opacity: source.category === 'meeting' ? 0.4 : 1 }}
+                style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 14px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.3)', background: 'rgba(34,197,94,0.06)', color: '#15803d', fontSize: 11, cursor: actionLoading ? 'not-allowed' : 'pointer' }}
               >
-                <Pause size={12} /> Pause
+                <PlayCircle size={12} /> Resume
               </button>
-              <button
-                type="button"
-                onClick={() => void handleScanNow()}
-                disabled={actionLoading || source.category === 'meeting'}
-                className="font-body font-semibold"
-                style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--color-bg-card)', color: 'var(--color-text-body)', fontSize: 11, cursor: actionLoading || source.category === 'meeting' ? 'not-allowed' : 'pointer', opacity: source.category === 'meeting' ? 0.4 : 1 }}
-              >
-                <RefreshCw size={12} /> Scan Now
+            )}
+            {source.status === 'disconnected' && (
+              <button type="button" className="font-body font-semibold" style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 14px', borderRadius: 8, border: 'none', background: 'var(--color-accent-500)', color: 'white', fontSize: 11, cursor: 'pointer' }}>
+                <Link size={12} /> Connect
               </button>
-            </>
-          )}
-          {source.status === 'paused' && (
-            <button
-              type="button"
-              onClick={() => void handleResume()}
-              disabled={actionLoading}
-              className="font-body font-semibold"
-              style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 14px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.3)', background: 'rgba(34,197,94,0.06)', color: '#15803d', fontSize: 11, cursor: actionLoading ? 'not-allowed' : 'pointer' }}
-            >
-              <PlayCircle size={12} /> Resume
-            </button>
-          )}
-          {source.status === 'disconnected' && (
-            <button type="button" className="font-body font-semibold" style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 14px', borderRadius: 8, border: 'none', background: 'var(--color-accent-500)', color: 'white', fontSize: 11, cursor: 'pointer' }}>
-              <Link size={12} /> Connect
-            </button>
+            )}
+          </div>
+
+          {/* Inline feedback */}
+          {(scanResult ?? processResult ?? actionError) && (
+            <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {actionError ? (
+                <span className="font-body" style={{ fontSize: 11, color: '#ef4444' }}>{actionError}</span>
+              ) : (
+                <>
+                  <Check size={11} style={{ color: '#22c55e', flexShrink: 0 }} />
+                  <span className="font-body" style={{ fontSize: 11, color: '#15803d' }}>
+                    {scanResult ?? processResult}
+                  </span>
+                </>
+              )}
+            </div>
           )}
         </div>
 

@@ -38,7 +38,7 @@ export function StatusBar({ hasError = false, hasMessages = false, onClearChat }
         padding: '0 24px',
         background: 'var(--color-bg-card)',
         borderBottom: '1px solid var(--border-subtle)',
-        gap: 10,
+        gap: 8,
       }}
     >
       <style>{`
@@ -61,14 +61,14 @@ export function StatusBar({ hasError = false, hasMessages = false, onClearChat }
       />
 
       <span
-        className="font-semibold"
+        className="font-body font-semibold"
         style={{ fontSize: 12, color: 'var(--color-text-primary)' }}
       >
         {label}
       </span>
 
       {stats && !isEmpty && !hasError && (
-        <span style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>
+        <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
           · {stats.nodeCount.toLocaleString()} nodes · {stats.chunkCount.toLocaleString()} chunks
         </span>
       )}
@@ -80,12 +80,12 @@ export function StatusBar({ hasError = false, hasMessages = false, onClearChat }
           className="font-body font-semibold cursor-pointer flex items-center"
           style={{
             gap: 5,
-            fontSize: 11,
+            fontSize: 12,
             color: 'var(--color-text-secondary)',
             background: 'none',
             border: '1px solid var(--border-subtle)',
-            borderRadius: 6,
-            padding: '3px 8px',
+            borderRadius: 20,
+            padding: '5px 13px',
             marginLeft: 'auto',
             cursor: 'pointer',
             transition: 'color 0.15s ease, border-color 0.15s ease',

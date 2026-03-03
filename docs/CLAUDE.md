@@ -118,11 +118,35 @@ synapse-v2/
 
 ### Component Design
 - Follow the design system in `docs/DESIGN-SYSTEM.md` for all visual decisions
-- The design system is the **single source of truth** for colors, typography, spacing, and component styling
+- **Consult `docs/UI-AUDIT.md`** for layout architecture, control bar patterns, and quality checklists — this is MANDATORY for every UI change
 - Light theme foundation — white cards on light gray backgrounds, blood orange accent (#d63a00)
 - Entity type colors are the primary chromatic elements — use them on badges, dots, graph nodes
 - One primary-accent button per view maximum
 - Hover transitions: 0.15–0.18s ease, subtle (border darkening, slight lift, barely-there shadow)
+
+### Layout Architecture (CRITICAL — follow for all views)
+- **Topbar:** 52px height, light orange bg (`--color-accent-50`). Left: page title (Cabinet Grotesk 15px/700). Center: search bar. Right: node/edge counts + avatar
+- **Full-width control bar:** Every view has a control bar BELOW the topbar and ABOVE the 2:1 column split. Must span full width across both columns.
+- **Control bar container (hard-coded pixel specs):**
+  - Simple bars (Ask, Home): `height: 44px` (fixed), `padding: 0 24px`, `gap: 8px`
+  - Complex bars (Explore, Pipeline, Automate, Capture, Orient): `minHeight: 44px`, `padding: 8px 24px`, `gap: 8px`
+  - All: `background: var(--color-bg-card)`, `borderBottom: 1px solid var(--border-subtle)`, `display: flex`, `align-items: center`, `flex-shrink: 0`
+- **Control bar pills/buttons (hard-coded pixel specs — NO EXCEPTIONS):**
+  - `borderRadius: 20px` — ALL interactive elements (pills, dropdown triggers, search inputs, toggle buttons). NEVER `borderRadius: 8`.
+  - `padding: 5px 13px` — ALL pill buttons and dropdown triggers
+  - `fontSize: 12px` — ALL text in control bars. Never 11px or 13px.
+  - `font-body font-semibold` (DM Sans weight 600)
+  - Active: `border: 1px solid rgba(214,58,0,0.15)`, `background: var(--color-accent-50)`, `color: var(--color-accent-500)`
+  - Inactive: `border: 1px solid var(--border-subtle)`, `background: transparent`, `color: var(--color-text-secondary)` — NEVER `--text-body`
+  - Dropdown chevrons: `size={12}`
+  - Search inputs: `borderRadius: 20px`, `padding: 5px 26px 5px 28px`
+  - Icon toggles (grid/list): `26×26px`, `borderRadius: 20px`, icon `size={12}`
+  - Dividers: `width: 1px`, `height: 24px`, `background: var(--border-subtle)`
+- **Gold standard:** Automate + Orient views are the reference. All other views must match their control bar height, pill styling, font size, and color exactly
+- **Explore view mode toggle:** Uses individual pill buttons (NOT a ToggleGroup/segmented control). Same styling as all other pills.
+- **No standalone title rows:** Page titles live in the topbar only. Views do NOT have dedicated title/subtitle blocks inside content areas
+- **View structure:** `<div className="flex flex-col h-full"><ControlBar /><div className="flex flex-1 overflow-hidden"><LeftCol /><DragHandle /><RightCol /></div></div>`
+- **Nav rail:** Expands as position:absolute overlay, never pushes layout. Center stage width never changes on hover
 
 ---
 
@@ -177,6 +201,7 @@ Before making decisions, consult these files:
 | `docs/BUILD-PLAN.md` | **Before starting ANY PRD** — understand sequencing, dependencies, and forward-compatible decisions |
 | `docs/ARCHITECTURE.md` | Before creating new files, services, or changing project structure |
 | `docs/DESIGN-SYSTEM.md` | Before making ANY visual/UI decision — colors, fonts, spacing, components |
+| `docs/UI-AUDIT.md` | **Before ANY UI implementation** — layout architecture, control bar patterns, quality checklists, view-specific rules |
 | `docs/DATA-MODEL.md` | Before writing ANY Supabase query or modifying database interactions |
 | `docs/LEGACY-PATTERNS.md` | Before implementing extraction, search, transcript processing, or cross-connections |
 | `docs/PROJECT-REFERENCE.md` | For strategic context — product vision, Knowledge Value Modes, ingestion pipeline details, debugging history |
@@ -185,13 +210,15 @@ Before making decisions, consult these files:
 
 ## Navigation Structure
 
-The app has 5 primary views accessible via a left nav rail:
+The app has 7 primary views accessible via a left nav rail:
 
-1. **Home** — Activity feed + briefings dashboard
-2. **Explore** — Graph visualization (Graph tab) + entity browser (Browse tab)
-3. **Ask** — Graph RAG chat interface with source citations
-4. **Ingest** — Manual content capture with extraction settings
-5. **Automate** — Integration management and processing queues
+1. **Home** (`/`) — Activity feed + quick stats dashboard
+2. **Explore** (`/explore`) — Graph visualization + entity browser
+3. **Ask** (`/ask`) — Graph RAG chat interface with source citations
+4. **Capture** (`/capture`) — Manual content capture (Text/URL/Document/Transcript modes)
+5. **Automate** (`/automate`) — Integration management, source cards, processing queues
+6. **Orient** (`/orient`) — Orientation digests and knowledge briefings
+7. **Pipeline** (`/pipeline`) — Ingestion health, extraction history, analytics
 
 Plus:
 - **Command Palette** (⌘K) — global search and navigation

@@ -567,14 +567,46 @@ export function CaptureView() {
     )
 
   return (
-    <>
+    <div className="flex flex-col h-full">
       <style>{`
         @keyframes fadeUp { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
       `}</style>
 
+      {/* ── Control bar — full width above split ── */}
+      <div
+        className="flex items-center shrink-0"
+        style={{
+          background: 'var(--color-bg-card)',
+          borderBottom: '1px solid var(--border-subtle)',
+          padding: '8px 24px',
+          minHeight: 44,
+          gap: 8,
+        }}
+      >
+        {MODES.map(({ key, label, Icon }) => {
+          const active = captureMode === key
+          return (
+            <button key={key} type="button" onClick={() => setCaptureMode(key)}
+              className="font-body font-semibold"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '5px 13px', borderRadius: 20, fontSize: 12,
+                border: active ? '1px solid rgba(214,58,0,0.15)' : '1px solid var(--border-subtle)',
+                background: active ? 'var(--color-accent-50)' : 'transparent',
+                color: active ? 'var(--color-accent-500)' : 'var(--color-text-secondary)',
+                cursor: 'pointer', transition: 'all 0.15s',
+              }}
+            >
+              <Icon size={13} />
+              {label}
+            </button>
+          )
+        })}
+      </div>
+
       <div
         ref={containerRef}
-        className="flex h-full overflow-hidden"
+        className="flex flex-1 overflow-hidden"
         style={{
           background: 'var(--color-bg-content)',
           userSelect: isDragging ? 'none' : undefined,
@@ -586,42 +618,10 @@ export function CaptureView() {
           className="h-full overflow-y-auto flex-shrink-0"
           style={{
             width: `${leftWidthPct}%`,
-            padding: '28px 32px',
+            padding: '20px 36px',
             transition: isDragging ? 'none' : 'width 0.2s ease',
           }}
         >
-          {/* Header */}
-          <h1 className="font-display font-extrabold text-text-primary" style={{
-            fontSize: 26, letterSpacing: '-0.02em', margin: 0,
-          }}>
-            Capture
-          </h1>
-          <p className="font-body" style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginTop: 2, marginBottom: 20 }}>
-            Add content from any source.
-          </p>
-
-          {/* Mode switcher */}
-          <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-            {MODES.map(({ key, label, Icon }) => {
-              const active = captureMode === key
-              return (
-                <button key={key} type="button" onClick={() => setCaptureMode(key)}
-                  className="font-body font-semibold"
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    padding: '7px 14px', borderRadius: 8, fontSize: 12,
-                    border: active ? '1px solid rgba(214,58,0,0.15)' : '1px solid var(--border-subtle)',
-                    background: active ? 'var(--color-accent-50)' : 'transparent',
-                    color: active ? 'var(--color-accent-500)' : 'var(--color-text-secondary)',
-                    cursor: 'pointer', transition: 'all 0.15s',
-                  }}
-                >
-                  <Icon size={13} />
-                  {label}
-                </button>
-              )
-            })}
-          </div>
 
           {/* ── Text ── */}
           {captureMode === 'text' && (
@@ -805,6 +805,6 @@ export function CaptureView() {
           {rightContent}
         </div>
       </div>
-    </>
+    </div>
   )
 }

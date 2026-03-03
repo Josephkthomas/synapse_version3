@@ -1,13 +1,21 @@
-import { useState, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { X, MessageSquare, GitBranch, RefreshCw, ArrowRight, Search, Link2, ChevronRight } from 'lucide-react'
+import { X, MessageSquare, GitBranch, RefreshCw, ArrowRight, Search, Link2, ChevronRight, Loader2 } from 'lucide-react'
 import { getSourceConfig } from '../../config/sourceTypes'
 import { getEntityColor } from '../../config/entityTypes'
 import { useSettings } from '../../hooks/useSettings'
-import { fetchNodeById } from '../../services/supabase'
+import { fetchNodeById, supabase } from '../../services/supabase'
 import { stripMarkdown } from '../../utils/stripMarkdown'
+import { resolveSummary } from '../../utils/summarize'
 import type { FeedItem } from '../../types/feed'
 import type { KnowledgeNode } from '../../types/database'
+
+const PROVENANCE_LABELS: Record<string, string> = {
+  extracted: 'From source',
+  generated: 'AI generated',
+  user: 'Edited',
+  truncated: 'Preview',
+}
 
 function formatRelativeTime(dateStr: string): string {
   const now = Date.now()
@@ -390,9 +398,11 @@ function EntityDetailPanel({
 function RelationshipDetailPanel({
   conn,
   onClose,
+  onSourceSelect,
 }: {
   conn: UnifiedConnection
   onClose: () => void
+  onSourceSelect?: (sourceId: string) => void
 }) {
   const navigate = useNavigate()
   const fromColor = getEntityColor(conn.fromEntityType)
@@ -488,7 +498,39 @@ function RelationshipDetailPanel({
       {conn.isExternal && conn.sourceName && (
         <div style={{ marginBottom: 14 }}>
           <SectionLabel>Connected Source</SectionLabel>
-          <p className="font-body" style={{ fontSize: 12, color: 'var(--color-text-secondary)', margin: '4px 0 0' }}>{conn.sourceName}</p>
+          {conn.toSourceId && onSourceSelect ? (
+            <button
+              type="button"
+              onClick={() => onSourceSelect(conn.toSourceId!)}
+              className="font-body cursor-pointer"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                marginTop: 5,
+                fontSize: 12,
+                fontWeight: 500,
+                color: 'var(--color-accent-500)',
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                textAlign: 'left',
+                textDecoration: 'underline',
+                textDecorationColor: 'rgba(214,58,0,0.3)',
+                textUnderlineOffset: 2,
+                transition: 'opacity 0.12s ease',
+              }}
+              onMouseEnter={e => { ;(e.currentTarget as HTMLButtonElement).style.opacity = '0.7' }}
+              onMouseLeave={e => { ;(e.currentTarget as HTMLButtonElement).style.opacity = '1' }}
+            >
+              {conn.sourceName}
+              <ArrowRight size={11} />
+            </button>
+          ) : (
+            <p className="font-body" style={{ fontSize: 12, color: 'var(--color-text-secondary)', margin: '4px 0 0' }}>
+              {conn.sourceName}
+            </p>
+          )}
         </div>
       )}
 
@@ -527,9 +569,10 @@ function RelationshipDetailPanel({
 interface HomeFeedDetailProps {
   item: FeedItem
   onClose: () => void
+  onSourceSelect?: (sourceId: string) => void
 }
 
-export function HomeFeedDetail({ item, onClose }: HomeFeedDetailProps) {
+export function HomeFeedDetail({ item, onClose, onSourceSelect }: HomeFeedDetailProps) {
   const navigate = useNavigate()
   const [connectionFilter, setConnectionFilter] = useState<ConnectionFilter>('all')
   const [selectedEntity, setSelectedEntity] = useState<KnowledgeNode | null>(null)
@@ -537,7 +580,23 @@ export function HomeFeedDetail({ item, onClose }: HomeFeedDetailProps) {
   const [loadingEntityId, setLoadingEntityId] = useState<string | null>(null)
   const [selectedConnection, setSelectedConnection] = useState<UnifiedConnection | null>(null)
 
+  // Summary state
+  const [currentSummary, setCurrentSummary] = useState<string | null>(item.source.summary ?? null)
+  const [currentSummarySource, setCurrentSummarySource] = useState<string | null>(item.source.summary_source ?? null)
+  const [isEditingSummary, setIsEditingSummary] = useState(false)
+  const [draftSummary, setDraftSummary] = useState('')
+  const [generationStatus, setGenerationStatus] = useState<'idle' | 'generating' | 'error'>('idle')
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
   const cfg = getSourceConfig(item.source.source_type)
+
+  // Reset summary state when item changes
+  useEffect(() => {
+    setCurrentSummary(item.source.summary ?? null)
+    setCurrentSummarySource(item.source.summary_source ?? null)
+    setIsEditingSummary(false)
+    setGenerationStatus('idle')
+  }, [item.source.id, item.source.summary, item.source.summary_source])
 
   const handleEntityClick = async (entityId: string) => {
     setLoadingEntityId(entityId)
@@ -553,6 +612,59 @@ export function HomeFeedDetail({ item, onClose }: HomeFeedDetailProps) {
     setSelectedEntity(null)
     setSelectedConnection(conn)
   }
+
+  // Summary handlers
+  const handleEditStart = () => {
+    setDraftSummary(currentSummary ?? '')
+    setIsEditingSummary(true)
+    setTimeout(() => textareaRef.current?.focus(), 50)
+  }
+
+  const handleEditSave = async () => {
+    const trimmed = draftSummary.trim()
+    if (!trimmed) return
+    const { error } = await supabase
+      .from('knowledge_sources')
+      .update({ summary: trimmed, summary_source: 'user' })
+      .eq('id', item.source.id)
+    if (!error) {
+      setCurrentSummary(trimmed)
+      setCurrentSummarySource('user')
+    }
+    setIsEditingSummary(false)
+  }
+
+  const handleEditCancel = () => {
+    setIsEditingSummary(false)
+  }
+
+  const handleGenerateSummary = async () => {
+    setGenerationStatus('generating')
+    try {
+      const result = await resolveSummary(
+        item.source.source_type ?? null,
+        item.source.content ?? null,
+        item.source.metadata ?? null,
+      )
+      if (result) {
+        const { error } = await supabase
+          .from('knowledge_sources')
+          .update({ summary: result.summary, summary_source: result.source })
+          .eq('id', item.source.id)
+        if (!error) {
+          setCurrentSummary(result.summary)
+          setCurrentSummarySource(result.source)
+        }
+      }
+      setGenerationStatus('idle')
+    } catch {
+      setGenerationStatus('error')
+    }
+  }
+
+  const contentPreview = item.source.content
+    ? item.source.content.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180) + '...'
+    : null
 
   // Unified connections
   const allConnections: UnifiedConnection[] = useMemo(() => [
@@ -715,17 +827,176 @@ export function HomeFeedDetail({ item, onClose }: HomeFeedDetailProps) {
         </SectionCard>
 
         {/* ── Summary card ── */}
-        {item.summary && (
-          <SectionCard>
-            <SectionLabel>Summary</SectionLabel>
+        <SectionCard>
+          <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
+            <div className="flex items-center gap-2">
+              <SectionLabel>Summary</SectionLabel>
+              {currentSummary && currentSummarySource && (
+                <span
+                  className="font-body"
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 500,
+                    color: 'var(--color-text-secondary)',
+                    background: 'var(--color-bg-inset)',
+                    borderRadius: 4,
+                    padding: '2px 6px',
+                  }}
+                >
+                  {PROVENANCE_LABELS[currentSummarySource] ?? currentSummarySource}
+                </span>
+              )}
+            </div>
+            {currentSummary && !isEditingSummary && (
+              <button
+                type="button"
+                onClick={handleEditStart}
+                className="font-body cursor-pointer"
+                style={{
+                  fontSize: 11,
+                  color: 'var(--color-accent-500)',
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  textDecoration: 'none',
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.textDecoration = 'underline' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.textDecoration = 'none' }}
+              >
+                Edit
+              </button>
+            )}
+          </div>
+
+          {isEditingSummary ? (
+            <div>
+              <textarea
+                ref={textareaRef}
+                value={draftSummary}
+                onChange={e => setDraftSummary(e.target.value)}
+                className="font-body w-full"
+                style={{
+                  fontSize: 13,
+                  color: 'var(--color-text-body)',
+                  background: 'var(--color-bg-inset)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 8,
+                  padding: '8px 10px',
+                  resize: 'vertical',
+                  minHeight: 80,
+                  maxHeight: 200,
+                  lineHeight: 1.5,
+                  outline: 'none',
+                }}
+                onFocus={e => { (e.currentTarget as HTMLTextAreaElement).style.borderColor = 'rgba(214,58,0,0.3)' }}
+                onBlur={e => { (e.currentTarget as HTMLTextAreaElement).style.borderColor = 'var(--border-subtle)' }}
+              />
+              <div className="flex items-center gap-2 mt-2">
+                <button
+                  type="button"
+                  onClick={handleEditSave}
+                  className="font-body font-semibold cursor-pointer"
+                  style={{
+                    fontSize: 11,
+                    padding: '5px 14px',
+                    borderRadius: 6,
+                    background: 'var(--color-bg-inset)',
+                    border: '1px solid var(--border-default)',
+                    color: 'var(--color-text-body)',
+                  }}
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEditCancel}
+                  className="font-body cursor-pointer"
+                  style={{
+                    fontSize: 11,
+                    padding: '5px 14px',
+                    borderRadius: 6,
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--color-text-secondary)',
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : currentSummary ? (
             <p
               className="font-body"
-              style={{ fontSize: 13, color: 'var(--color-text-body)', lineHeight: 1.6, marginTop: 8, marginBottom: 0 }}
+              style={{ fontSize: 13, color: 'var(--color-text-body)', lineHeight: 1.6, marginTop: 0, marginBottom: 0 }}
             >
-              {stripMarkdown(item.summary)}
+              {stripMarkdown(currentSummary)}
             </p>
-          </SectionCard>
-        )}
+          ) : contentPreview ? (
+            <div>
+              <p
+                className="font-body"
+                style={{
+                  fontSize: 13,
+                  color: 'var(--color-text-secondary)',
+                  fontStyle: 'italic',
+                  lineHeight: 1.6,
+                  marginTop: 0,
+                  marginBottom: 0,
+                }}
+              >
+                {contentPreview}
+              </p>
+              <button
+                type="button"
+                onClick={handleGenerateSummary}
+                disabled={generationStatus === 'generating'}
+                className="font-body cursor-pointer inline-flex items-center gap-1.5"
+                style={{
+                  fontSize: 11,
+                  color: 'var(--color-accent-500)',
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  marginTop: 8,
+                  opacity: generationStatus === 'generating' ? 0.6 : 1,
+                }}
+              >
+                {generationStatus === 'generating' ? (
+                  <>
+                    <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                    Generating...
+                  </>
+                ) : (
+                  'Generate summary'
+                )}
+              </button>
+              {generationStatus === 'error' && (
+                <p className="font-body" style={{ fontSize: 11, color: 'var(--color-semantic-red-500)', marginTop: 4, marginBottom: 0 }}>
+                  Summary generation failed —{' '}
+                  <button
+                    type="button"
+                    onClick={handleGenerateSummary}
+                    className="font-body cursor-pointer"
+                    style={{
+                      fontSize: 11,
+                      color: 'var(--color-accent-500)',
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    Retry
+                  </button>
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="font-body" style={{ fontSize: 12, color: 'var(--color-text-placeholder)', marginTop: 0, marginBottom: 0 }}>
+              No content available
+            </p>
+          )}
+        </SectionCard>
 
         {/* ── Entities card ── */}
         {item.entities.length > 0 && (
@@ -937,6 +1208,7 @@ export function HomeFeedDetail({ item, onClose }: HomeFeedDetailProps) {
           <RelationshipDetailPanel
             conn={selectedConnection}
             onClose={() => setSelectedConnection(null)}
+            onSourceSelect={onSourceSelect}
           />
         ) : null
       )}

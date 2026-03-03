@@ -3,6 +3,7 @@ interface ContentColumnProps {
   maxWidth?: number
   className?: string
   leftAlign?: boolean
+  fullWidth?: boolean
 }
 
 export function ContentColumn({
@@ -10,6 +11,7 @@ export function ContentColumn({
   maxWidth = 840,
   className,
   leftAlign = false,
+  fullWidth = false,
 }: ContentColumnProps) {
   return (
     <div
@@ -18,9 +20,9 @@ export function ContentColumn({
     >
       <div
         style={{
-          maxWidth: leftAlign ? undefined : maxWidth,
-          margin: leftAlign ? 0 : '0 auto',
-          padding: '28px 32px',
+          maxWidth: fullWidth ? undefined : leftAlign ? undefined : maxWidth,
+          margin: fullWidth ? 0 : leftAlign ? 0 : '0 auto',
+          padding: fullWidth ? 0 : '28px 36px',
         }}
       >
         {children}

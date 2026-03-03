@@ -86,7 +86,7 @@ function FieldLabel({ children }: { children: ReactNode }) {
   return (
     <label
       className="block font-body font-semibold"
-      style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 5 }}
+      style={{ fontSize: 12, color: 'var(--color-text-body)', marginBottom: 5 }}
     >
       {children}
     </label>

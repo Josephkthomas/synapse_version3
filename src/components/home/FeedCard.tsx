@@ -132,8 +132,8 @@ export function FeedCard({ item, animDelay, isSelected, onItemSelect }: FeedCard
         </div>
         <div className="min-w-0 flex-1">
           <p
-            className="font-body font-semibold text-text-primary"
-            style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            className="font-display font-bold text-text-primary"
+            style={{ fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
           >
             {item.source.title ?? 'Untitled Source'}
           </p>
@@ -149,7 +149,8 @@ export function FeedCard({ item, animDelay, isSelected, onItemSelect }: FeedCard
           className="font-body"
           style={{
             fontSize: 12,
-            color: 'var(--color-text-body)',
+            color: item.isFallbackSummary ? 'var(--color-text-secondary)' : 'var(--color-text-body)',
+            fontStyle: item.isFallbackSummary ? 'italic' : 'normal',
             lineHeight: 1.5,
             marginTop: 8,
             display: '-webkit-box',

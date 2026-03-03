@@ -11,8 +11,9 @@ const VIEW_TITLES: Record<string, string> = {
   '/explore': 'Explore',
   '/ask': 'Ask',
   '/capture': 'Capture',
-  '/ingest': 'Ingest',
   '/automate': 'Automate',
+  '/orient': 'Orient',
+  '/pipeline': 'Pipeline',
 }
 
 interface TopBarProps {
@@ -29,7 +30,6 @@ export function TopBar({ onOpenSettings, onOpenCommandPalette }: TopBarProps) {
 
   const viewTitle = VIEW_TITLES[location.pathname] ?? 'Synapse'
 
-  // Get initial from profile name or email
   const profileName = profile?.professional_context?.role
   const displayName = profileName ?? user?.email ?? ''
   const initial = displayName.charAt(0).toUpperCase() || '?'
@@ -50,20 +50,23 @@ export function TopBar({ onOpenSettings, onOpenCommandPalette }: TopBarProps) {
     <header
       className="flex items-center shrink-0"
       style={{
-        height: 50,
-        background: 'var(--color-bg-card)',
+        height: 52,
+        background: 'var(--color-accent-50)',
         borderBottom: '1px solid var(--border-subtle)',
-        paddingLeft: 32,
-        paddingRight: 32,
+        paddingLeft: 24,
+        paddingRight: 24,
       }}
     >
-      {/* View title */}
-      <span className="font-display text-[15px] font-bold text-text-primary">
+      {/* View title — left side, next to Synapse logo */}
+      <span
+        className="font-display font-bold text-text-primary shrink-0"
+        style={{ fontSize: 15, letterSpacing: '-0.01em', marginRight: 24 }}
+      >
         {viewTitle}
       </span>
 
-      {/* Center — Search bar */}
-      <div className="flex-1 flex justify-center px-6">
+      {/* Search bar — centered */}
+      <div className="flex-1 flex justify-center">
         <button
           type="button"
           onClick={onOpenCommandPalette}
@@ -72,21 +75,23 @@ export function TopBar({ onOpenSettings, onOpenCommandPalette }: TopBarProps) {
             width: '100%',
             maxWidth: 420,
             padding: '7px 12px',
-            fontSize: 12,
-            background: 'var(--color-bg-inset)',
+            fontSize: 13,
+            background: 'rgba(255,255,255,0.7)',
             border: '1px solid var(--border-subtle)',
             borderRadius: 10,
             color: 'var(--color-text-placeholder)',
-            transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
+            transition: 'border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease',
           }}
           onMouseEnter={e => {
             e.currentTarget.style.borderColor = 'rgba(214,58,0,0.2)'
+            e.currentTarget.style.background = 'rgba(255,255,255,0.9)'
           }}
           onMouseLeave={e => {
             e.currentTarget.style.borderColor = 'var(--border-subtle)'
+            e.currentTarget.style.background = 'rgba(255,255,255,0.7)'
           }}
         >
-          <Search size={14} style={{ flexShrink: 0 }} />
+          <Search size={14} style={{ flexShrink: 0, color: 'var(--color-text-secondary)' }} />
           <span className="flex-1" style={{ textAlign: 'left' }}>
             Search graph…
           </span>
@@ -94,9 +99,9 @@ export function TopBar({ onOpenSettings, onOpenCommandPalette }: TopBarProps) {
         </button>
       </div>
 
-      {/* Right side */}
-      <div className="flex items-center gap-4">
-        <span className="font-body text-[12px] text-text-secondary" style={{ whiteSpace: 'nowrap' }}>
+      {/* Right side — metadata + avatar */}
+      <div className="flex items-center gap-4 shrink-0">
+        <span className="font-body text-[12px]" style={{ whiteSpace: 'nowrap', color: 'var(--color-text-secondary)' }}>
           {nodeCount.toLocaleString()} nodes · {edgeCount.toLocaleString()} edges
         </span>
 
@@ -115,6 +120,7 @@ export function TopBar({ onOpenSettings, onOpenCommandPalette }: TopBarProps) {
             fontSize: 11,
             fontWeight: 700,
             lineHeight: 1,
+            marginRight: 4,
           }}
         >
           {initial}

@@ -870,7 +870,7 @@ export async function keywordSearchSources(
 
   const { data, error } = await supabase
     .from('knowledge_sources')
-    .select('id, title, source_type, source_url, created_at')
+    .select('id, title, source_type, source_url, created_at, summary, summary_source')
     .eq('user_id', userId)
     .or(orFilter)
     .order('created_at', { ascending: false }) // most recent first — handles "latest" queries
@@ -952,19 +952,19 @@ export async function traverseGraphFromNodes(
 
 export async function fetchSourcesByIds(
   sourceIds: string[]
-): Promise<Map<string, { id: string; title: string | null; source_type: string | null; created_at: string }>> {
+): Promise<Map<string, { id: string; title: string | null; source_type: string | null; created_at: string; summary: string | null; summary_source: string | null }>> {
   if (sourceIds.length === 0) return new Map()
 
   const uniqueIds = [...new Set(sourceIds)]
   const { data, error } = await supabase
     .from('knowledge_sources')
-    .select('id, title, source_type, created_at')
+    .select('id, title, source_type, created_at, summary, summary_source')
     .in('id', uniqueIds)
 
   if (error || !data) return new Map()
 
   return new Map(
-    (data as { id: string; title: string | null; source_type: string | null; created_at: string }[])
+    (data as { id: string; title: string | null; source_type: string | null; created_at: string; summary: string | null; summary_source: string | null }[])
       .map(s => [s.id, s])
   )
 }
@@ -1647,4 +1647,202 @@ export async function deleteDigestProfile(profileId: string): Promise<void> {
     .eq('id', profileId)
   if (error) throw new Error(error.message)
   // digest_modules, digest_channels, digest_history cascade-delete via FK
+}
+
+// ─── Pipeline: History ───────────────────────────────────────────────────────
+
+export interface PipelineSession {
+  id: string
+  source_name: string | null
+  source_type: string | null
+  source_content_preview: string | null
+  extraction_mode: string
+  anchor_emphasis: string
+  user_guidance: string | null
+  selected_anchor_ids: string[] | null
+  entity_count: number
+  relationship_count: number
+  extraction_duration_ms: number | null
+  feedback_rating: number | null
+  feedback_text: string | null
+  created_at: string
+  extracted_node_ids: string[] | null
+  extracted_edge_ids: string[] | null
+}
+
+export async function fetchPipelineHistory(
+  userId: string,
+  limit: number = 20,
+  offset: number = 0
+): Promise<{ sessions: PipelineSession[]; totalCount: number }> {
+  try {
+    const { data, error, count } = await supabase
+      .from('extraction_sessions')
+      .select(
+        'id, source_name, source_type, source_content_preview, extraction_mode, anchor_emphasis, user_guidance, selected_anchor_ids, entity_count, relationship_count, extraction_duration_ms, feedback_rating, feedback_text, created_at, extracted_node_ids, extracted_edge_ids',
+        { count: 'exact' }
+      )
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1)
+
+    if (error) {
+      console.warn('[supabase] fetchPipelineHistory failed:', error.message)
+      return { sessions: [], totalCount: 0 }
+    }
+
+    return { sessions: (data ?? []) as PipelineSession[], totalCount: count ?? 0 }
+  } catch (err) {
+    console.warn('[supabase] extraction_sessions table may not exist:', err)
+    return { sessions: [], totalCount: 0 }
+  }
+}
+
+export async function fetchActiveQueueItems(userId: string): Promise<PipelineSession[]> {
+  try {
+    const { data, error } = await supabase
+      .from('youtube_ingestion_queue')
+      .select('id, video_title, status, created_at, started_at, channel_id')
+      .eq('user_id', userId)
+      .in('status', ['pending', 'fetching_transcript', 'extracting'])
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.warn('[supabase] fetchActiveQueueItems failed:', error.message)
+      return []
+    }
+
+    // Map queue items to PipelineSession shape
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (data ?? []).map((item: any) => ({
+      id: item.id,
+      source_name: item.video_title ?? 'Untitled Video',
+      source_type: 'YouTube',
+      source_content_preview: null,
+      extraction_mode: 'comprehensive',
+      anchor_emphasis: 'standard',
+      user_guidance: null,
+      selected_anchor_ids: null,
+      entity_count: 0,
+      relationship_count: 0,
+      extraction_duration_ms: null,
+      feedback_rating: null,
+      feedback_text: null,
+      created_at: item.created_at,
+      extracted_node_ids: null,
+      extracted_edge_ids: null,
+      // Extra field to mark as queue item
+      _queueStatus: item.status,
+    })) as PipelineSession[]
+  } catch (err) {
+    console.warn('[supabase] youtube_ingestion_queue fetch failed:', err)
+    return []
+  }
+}
+
+// ─── Pipeline: Heatmap Data ─────────────────────────────────────────────────
+
+export interface HeatmapRawSession {
+  created_at: string
+  entity_count: number
+  relationship_count: number
+  extraction_duration_ms: number | null
+  source_type: string | null
+}
+
+export async function fetchHeatmapSessions(userId: string): Promise<HeatmapRawSession[]> {
+  const cutoff = new Date()
+  cutoff.setDate(cutoff.getDate() - 91)
+
+  try {
+    const { data, error } = await supabase
+      .from('extraction_sessions')
+      .select('created_at, entity_count, relationship_count, extraction_duration_ms, source_type')
+      .eq('user_id', userId)
+      .gte('created_at', cutoff.toISOString())
+      .order('created_at', { ascending: true })
+
+    if (error) {
+      console.warn('[supabase] fetchHeatmapSessions failed:', error.message)
+      return []
+    }
+
+    return (data ?? []) as HeatmapRawSession[]
+  } catch (err) {
+    console.warn('[supabase] heatmap sessions fetch failed:', err)
+    return []
+  }
+}
+
+// ─── Pipeline: Entity Breakdown ─────────────────────────────────────────────
+
+export async function fetchEntityBreakdownByIds(
+  nodeIds: string[]
+): Promise<Record<string, number>> {
+  if (nodeIds.length === 0) return {}
+
+  try {
+    const { data, error } = await supabase
+      .from('knowledge_nodes')
+      .select('entity_type')
+      .in('id', nodeIds)
+
+    if (error) {
+      console.warn('[supabase] fetchEntityBreakdown failed:', error.message)
+      return {}
+    }
+
+    const breakdown: Record<string, number> = {}
+    for (const row of data ?? []) {
+      const t = (row as { entity_type: string }).entity_type
+      breakdown[t] = (breakdown[t] ?? 0) + 1
+    }
+    return breakdown
+  } catch {
+    return {}
+  }
+}
+
+// ─── Pipeline: Rating ───────────────────────────────────────────────────────
+
+export async function updateExtractionRating(
+  sessionId: string,
+  rating: number,
+  text?: string
+): Promise<void> {
+  const updates: Record<string, unknown> = { feedback_rating: rating }
+  if (text !== undefined) updates.feedback_text = text
+
+  const { error } = await supabase
+    .from('extraction_sessions')
+    .update(updates)
+    .eq('id', sessionId)
+
+  if (error) throw new Error(`Failed to save rating: ${error.message}`)
+}
+
+// ─── Pipeline: Delete Extraction ────────────────────────────────────────────
+
+export async function deleteExtractionSession(
+  sessionId: string,
+  nodeIds?: string[],
+  edgeIds?: string[]
+): Promise<void> {
+  // Delete edges first (FK constraint)
+  if (edgeIds && edgeIds.length > 0) {
+    await supabase.from('knowledge_edges').delete().in('id', edgeIds)
+  }
+
+  // Delete nodes
+  if (nodeIds && nodeIds.length > 0) {
+    await supabase.from('knowledge_nodes').delete().in('id', nodeIds)
+  }
+
+  // Delete the session
+  const { error } = await supabase
+    .from('extraction_sessions')
+    .delete()
+    .eq('id', sessionId)
+
+  if (error) throw new Error(`Failed to delete extraction: ${error.message}`)
 }

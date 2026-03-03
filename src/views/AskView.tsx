@@ -1,15 +1,25 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { GripVertical } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useRAGQuery } from '../hooks/useRAGQuery'
 import { useChatScroll } from '../hooks/useChatScroll'
 import { useQueryComposer } from '../hooks/useQueryComposer'
+import { useGraphContext } from '../hooks/useGraphContext'
 import { getGraphStats } from '../services/supabase'
 import { DEFAULT_QUERY_CONFIG } from '../types/rag'
 import { StatusBar } from '../components/ask/StatusBar'
 import { ChatMessageList } from '../components/ask/ChatMessageList'
 import { ChatInput } from '../components/ask/ChatInput'
 import { EmptyAskState } from '../components/ask/EmptyAskState'
+import { AskRightPanel } from '../components/ask/AskRightPanel'
+import { NodeDetail } from '../components/panels/NodeDetail'
+import { SourceDetail } from '../components/panels/SourceDetail'
+
+// ─── Layout constants ────────────────────────────────────────────────────────
+const DEFAULT_LEFT_PCT = 64
+const MIN_LEFT_PCT = 30
+const MAX_LEFT_PCT = 80
 
 export function AskView() {
   const { user } = useAuth()
@@ -17,6 +27,7 @@ export function AskView() {
   const navigate = useNavigate()
   const { messages, isLoading, pipelineEvents, error, sendMessage, clearChat } = useRAGQuery()
   const scroll = useChatScroll(messages.length)
+  const { rightPanelContent, askContext, setRightPanelContent, clearRightPanel } = useGraphContext()
   const {
     config,
     setMindset,
@@ -47,12 +58,50 @@ export function AskView() {
     void sendMessage(query, DEFAULT_QUERY_CONFIG)
   }, [user, sendMessage, navigate])
 
+  // ─── Drag resize ───────────────────────────────────────────────────────
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [leftWidthPct, setLeftWidthPct] = useState(DEFAULT_LEFT_PCT)
+  const [isDragging, setIsDragging] = useState(false)
+  const dragStartX = useRef(0)
+  const dragStartPct = useRef(DEFAULT_LEFT_PCT)
+
+  const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    dragStartX.current = e.clientX
+    dragStartPct.current = leftWidthPct
+    setIsDragging(true)
+
+    const onMove = (ev: MouseEvent) => {
+      if (!containerRef.current) return
+      const containerW = containerRef.current.getBoundingClientRect().width
+      const delta = ev.clientX - dragStartX.current
+      const deltaPct = (delta / containerW) * 100
+      setLeftWidthPct(Math.min(MAX_LEFT_PCT, Math.max(MIN_LEFT_PCT, dragStartPct.current + deltaPct)))
+    }
+    const onUp = () => {
+      setIsDragging(false)
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+  }, [leftWidthPct])
+
+  // ─── Handlers ──────────────────────────────────────────────────────────
   const handleSend = (text: string) => {
     void sendMessage(text, config)
   }
 
   const handleSuggestion = (text: string) => {
     void sendMessage(text, config)
+  }
+
+  const handleBackToAskContext = () => {
+    if (askContext) {
+      setRightPanelContent({ type: 'ask_context', data: askContext })
+    } else {
+      clearRightPanel()
+    }
   }
 
   const hasMessages = messages.length > 0
@@ -62,53 +111,188 @@ export function AskView() {
       ? `Scoped to ${config.scopeAnchors.length} anchor${config.scopeAnchors.length > 1 ? 's' : ''}`
       : undefined
 
+  // ─── Right panel content (mirrors RightPanel.tsx Ask logic) ────────────
+  const renderRightPanel = () => {
+    if (rightPanelContent?.type === 'ask_context') {
+      return <AskRightPanel context={rightPanelContent.data} />
+    }
+    if (rightPanelContent?.type === 'node') {
+      return (
+        <div className="flex flex-col gap-0">
+          {askContext && (
+            <button
+              type="button"
+              onClick={handleBackToAskContext}
+              className="font-body font-semibold cursor-pointer mb-3 text-left"
+              style={{
+                fontSize: 11,
+                color: 'var(--color-text-secondary)',
+                background: 'none',
+                border: 'none',
+                padding: '0 0 8px 0',
+                borderBottom: '1px solid var(--border-subtle)',
+              }}
+            >
+              ← Back to Context
+            </button>
+          )}
+          <NodeDetail node={rightPanelContent.data} onClose={handleBackToAskContext} />
+        </div>
+      )
+    }
+    if (rightPanelContent?.type === 'source') {
+      return (
+        <div className="flex flex-col gap-0">
+          {askContext && (
+            <button
+              type="button"
+              onClick={handleBackToAskContext}
+              className="font-body font-semibold cursor-pointer mb-3 text-left"
+              style={{
+                fontSize: 11,
+                color: 'var(--color-text-secondary)',
+                background: 'none',
+                border: 'none',
+                padding: '0 0 8px 0',
+                borderBottom: '1px solid var(--border-subtle)',
+              }}
+            >
+              ← Back to Context
+            </button>
+          )}
+          <SourceDetail source={rightPanelContent.data} onClose={handleBackToAskContext} />
+        </div>
+      )
+    }
+    // Default placeholder
+    return (
+      <div className="flex flex-col gap-3">
+        <p
+          className="font-body"
+          style={{ fontSize: 12, color: 'var(--color-text-placeholder)', lineHeight: 1.6 }}
+        >
+          Ask a question to see the context subgraph and source chunks used for the response.
+        </p>
+      </div>
+    )
+  }
+
+  const panelTitle = () => {
+    if (rightPanelContent?.type === 'ask_context') return 'Context'
+    if (rightPanelContent?.type === 'node') return 'Entity Detail'
+    if (rightPanelContent?.type === 'source') return 'Source Detail'
+    return 'Context'
+  }
+
   return (
     <div className="flex flex-col h-full">
-      {/* Page title — only shown in empty state */}
-      {!hasMessages && (
-        <div style={{ padding: '20px 24px 0', flexShrink: 0 }}>
-          <h1
-            className="font-display font-extrabold text-text-primary"
-            style={{ fontSize: 26, letterSpacing: '-0.02em', margin: 0 }}
-          >
-            Ask
-          </h1>
-        </div>
-      )}
-
-      {/* Status bar with reset */}
+      {/* Status bar — full width above the 2:1 split */}
       <StatusBar
         hasError={!!error && !hasMessages}
         hasMessages={hasMessages}
         onClearChat={clearChat}
       />
 
-      {/* Chat area */}
-      {!hasMessages ? (
-        <div className="flex-1 overflow-y-auto">
-          <EmptyAskState onSendSuggestion={handleSuggestion} isEmpty={graphIsEmpty} />
-        </div>
-      ) : (
-        <ChatMessageList
-          messages={messages}
-          isLoading={isLoading}
-          pipelineEvents={pipelineEvents}
-          scroll={scroll}
-        />
-      )}
+      {/* 2:1 split */}
+      <div
+        ref={containerRef}
+        className="flex flex-1 overflow-hidden"
+        style={{
+          userSelect: isDragging ? 'none' : undefined,
+          cursor: isDragging ? 'col-resize' : undefined,
+        }}
+      >
+        {/* ── Left column: chat area ──────────────────────────────────── */}
+        <div
+          className="flex flex-col"
+          style={{
+            width: `${leftWidthPct}%`,
+            transition: isDragging ? 'none' : 'width 0.2s ease',
+            height: '100%',
+            flexShrink: 0,
+          }}
+        >
+          {!hasMessages ? (
+            <div className="flex-1 overflow-y-auto">
+              <EmptyAskState onSendSuggestion={handleSuggestion} isEmpty={graphIsEmpty} />
+            </div>
+          ) : (
+            <ChatMessageList
+              messages={messages}
+              isLoading={isLoading}
+              pipelineEvents={pipelineEvents}
+              scroll={scroll}
+            />
+          )}
 
-      {/* Input bar with inline dropdown toolbar */}
-      <ChatInput
-        onSend={handleSend}
-        disabled={isLoading}
-        helperText={helperText}
-        config={config}
-        onSetMindset={setMindset}
-        onToggleScopeAnchor={toggleScopeAnchor}
-        onClearScope={clearScope}
-        onSetToolMode={setToolMode}
-        onSetModelTier={setModelTier}
-      />
+          <ChatInput
+            onSend={handleSend}
+            disabled={isLoading}
+            helperText={helperText}
+            config={config}
+            onSetMindset={setMindset}
+            onToggleScopeAnchor={toggleScopeAnchor}
+            onClearScope={clearScope}
+            onSetToolMode={setToolMode}
+            onSetModelTier={setModelTier}
+          />
+        </div>
+
+        {/* ── Drag handle ─────────────────────────────────────────────── */}
+        <div
+          onMouseDown={handleDividerMouseDown}
+          style={{
+            width: 12,
+            height: '100%',
+            cursor: 'col-resize',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'var(--color-bg-content)',
+            borderLeft: '1px solid var(--border-subtle)',
+            flexShrink: 0,
+            zIndex: 10,
+          }}
+        >
+          <GripVertical size={14} style={{ color: 'var(--color-text-placeholder)', pointerEvents: 'none' }} />
+        </div>
+
+        {/* ── Right column: context panel ──────────────────────────────── */}
+        <div
+          className="flex flex-col"
+          style={{
+            flex: 1,
+            height: '100%',
+            overflow: 'hidden',
+            minWidth: 0,
+            background: 'var(--color-bg-card)',
+          }}
+        >
+          {/* Panel header */}
+          <div
+            className="shrink-0 px-4 flex items-center"
+            style={{ height: 50, borderBottom: '1px solid var(--border-subtle)' }}
+          >
+            <span className="font-display text-[12px] font-bold text-text-secondary uppercase tracking-[0.06em]">
+              {panelTitle()}
+            </span>
+          </div>
+
+          {/* Scrollable content */}
+          <div
+            className="flex-1 overflow-y-auto"
+            style={{
+              padding: 24,
+              overflowX: 'hidden',
+              minWidth: 0,
+              overflowWrap: 'break-word',
+              wordBreak: 'break-word',
+            }}
+          >
+            {renderRightPanel()}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

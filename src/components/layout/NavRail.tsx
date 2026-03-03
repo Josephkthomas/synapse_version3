@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Home, Compass, MessageSquare, Plus, Zap, Search, Settings, type LucideIcon } from 'lucide-react'
+import { Home, Compass, MessageSquare, Plus, Zap, Navigation, Activity, Search, Settings, type LucideIcon } from 'lucide-react'
 import { useGraphContext } from '../../hooks/useGraphContext'
 import { Kbd } from '../ui/Kbd'
 import { SynapseLogo } from '../shared/SynapseLogo'
@@ -11,6 +11,8 @@ const NAV_ITEMS: Array<{ id: string; label: string; path: string; icon: LucideIc
   { id: 'ask', label: 'Ask', path: '/ask', icon: MessageSquare },
   { id: 'capture', label: 'Capture', path: '/capture', icon: Plus },
   { id: 'automate', label: 'Automate', path: '/automate', icon: Zap },
+  { id: 'orient', label: 'Orient', path: '/orient', icon: Navigation },
+  { id: 'pipeline', label: 'Pipeline', path: '/pipeline', icon: Activity },
 ]
 
 interface NavRailProps {
@@ -98,10 +100,10 @@ function NavItemButton({
 
       {expanded && (
         <span
-          className="whitespace-nowrap overflow-hidden font-body text-[13px]"
+          className="whitespace-nowrap overflow-hidden font-body text-[12px]"
           style={{
             color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-            fontWeight: isActive ? 600 : 500,
+            fontWeight: 500,
           }}
         >
           {item.label}
@@ -126,11 +128,15 @@ function UtilButton({
   onClick: () => void
   extra?: React.ReactNode
 }) {
+  const [hovered, setHovered] = useState(false)
+
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex items-center cursor-pointer border-none rounded-[10px] hover:bg-bg-hover"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className="flex items-center cursor-pointer border-none rounded-[10px]"
       style={{
         height: 40,
         width: expanded ? '100%' : 40,
@@ -138,13 +144,16 @@ function UtilButton({
         paddingRight: expanded ? 12 : 0,
         gap: 12,
         justifyContent: expanded ? 'flex-start' : 'center',
-        background: 'transparent',
+        background: hovered ? 'rgba(0,0,0,0.04)' : 'transparent',
         transition: 'background 0.15s ease, width 0.2s ease, padding 0.2s ease',
       }}
     >
       <Icon size={iconSize} strokeWidth={1.8} className="shrink-0" style={{ color: 'var(--color-text-secondary)' }} />
       {expanded && (
-        <span className="whitespace-nowrap overflow-hidden flex items-center gap-2 font-body text-[12px] text-text-secondary">
+        <span
+          className="whitespace-nowrap overflow-hidden flex items-center gap-2 font-body text-[12px] text-text-secondary"
+          style={{ fontWeight: 500 }}
+        >
           {label}
           {extra}
         </span>
@@ -157,87 +166,93 @@ export function NavRail({ onOpenCommandPalette, onOpenSettings }: NavRailProps) 
   const [expanded, setExpanded] = useState(false)
 
   return (
-    <nav
-      onMouseEnter={() => setExpanded(true)}
-      onMouseLeave={() => setExpanded(false)}
-      className="flex flex-col h-screen shrink-0 overflow-hidden"
-      style={{
-        width: expanded ? 190 : 56,
-        background: 'var(--color-bg-frame)',
-        borderRight: '1px solid var(--border-subtle)',
-        transition: 'width 0.2s ease',
-      }}
-    >
-      {/* Logo header — center the 30px logo in the 56px rail when collapsed */}
-      <div
-        className="flex items-center shrink-0"
+    // Outer: always 56px, participates in flex layout, never changes width
+    <div className="w-[56px] flex-shrink-0 relative" style={{ zIndex: 100 }}>
+      {/* Inner: positioned absolutely, animates width as overlay */}
+      <nav
+        onMouseEnter={() => setExpanded(true)}
+        onMouseLeave={() => setExpanded(false)}
+        className="absolute left-0 top-0 h-full flex flex-col overflow-hidden"
         style={{
-          height: 52,
-          borderBottom: '1px solid var(--border-subtle)',
-          paddingLeft: expanded ? 14 : 13,
-          gap: 10,
-          transition: 'padding 0.2s ease',
+          width: expanded ? 190 : 56,
+          background: 'var(--color-bg-frame)',
+          borderRight: '1px solid var(--border-subtle)',
+          transition: 'width 0.2s ease-out',
+          zIndex: 200,
+          boxShadow: expanded ? '4px 0 16px rgba(0,0,0,0.06)' : 'none',
         }}
       >
-        <SynapseLogo size={30} />
-        {expanded && (
-          <span
-            className="whitespace-nowrap overflow-hidden"
-            style={{
-              fontFamily: 'var(--font-display)',
-              fontSize: 14,
-              fontWeight: 700,
-              color: 'var(--color-text-primary)',
-            }}
-          >
-            Synapse
-          </span>
-        )}
-      </div>
+        {/* Logo header — center the 30px logo in the 56px rail when collapsed */}
+        <div
+          className="flex items-center shrink-0"
+          style={{
+            height: 52,
+            borderBottom: '1px solid var(--border-subtle)',
+            paddingLeft: expanded ? 14 : 13,
+            gap: 10,
+            transition: 'padding 0.2s ease',
+          }}
+        >
+          <SynapseLogo size={30} />
+          {expanded && (
+            <span
+              className="whitespace-nowrap overflow-hidden"
+              style={{
+                fontFamily: 'var(--font-display)',
+                fontSize: 14,
+                fontWeight: 700,
+                color: 'var(--color-text-primary)',
+              }}
+            >
+              Synapse
+            </span>
+          )}
+        </div>
 
-      {/* Nav items — center when collapsed, left-align when expanded */}
-      <div
-        className="flex flex-col gap-1 pt-7"
-        style={{
-          alignItems: expanded ? 'stretch' : 'center',
-          paddingLeft: expanded ? 8 : 0,
-          paddingRight: expanded ? 8 : 0,
-          transition: 'padding 0.2s ease',
-        }}
-      >
-        {NAV_ITEMS.map((item) => (
-          <NavItemButton key={item.id} item={item} expanded={expanded} />
-        ))}
-      </div>
+        {/* Nav items — 28px gap below logo (pt-7 = 28px) */}
+        <div
+          className="flex flex-col gap-1 pt-7"
+          style={{
+            alignItems: expanded ? 'stretch' : 'center',
+            paddingLeft: expanded ? 8 : 0,
+            paddingRight: expanded ? 8 : 0,
+            transition: 'padding 0.2s ease',
+          }}
+        >
+          {NAV_ITEMS.map((item) => (
+            <NavItemButton key={item.id} item={item} expanded={expanded} />
+          ))}
+        </div>
 
-      {/* Spacer */}
-      <div className="flex-1" />
+        {/* Spacer */}
+        <div className="flex-1" />
 
-      {/* Bottom utilities */}
-      <div
-        className="flex flex-col gap-1 pb-3 pt-2"
-        style={{
-          borderTop: '1px solid var(--border-subtle)',
-          alignItems: expanded ? 'stretch' : 'center',
-          paddingLeft: expanded ? 8 : 0,
-          paddingRight: expanded ? 8 : 0,
-          transition: 'padding 0.2s ease',
-        }}
-      >
-        <UtilButton
-          icon={Search}
-          label="Search"
-          expanded={expanded}
-          onClick={onOpenCommandPalette}
-          extra={<Kbd>⌘K</Kbd>}
-        />
-        <UtilButton
-          icon={Settings}
-          label="Settings"
-          expanded={expanded}
-          onClick={onOpenSettings}
-        />
-      </div>
-    </nav>
+        {/* Bottom utilities */}
+        <div
+          className="flex flex-col gap-1 pb-3 pt-2"
+          style={{
+            borderTop: '1px solid var(--border-subtle)',
+            alignItems: expanded ? 'stretch' : 'center',
+            paddingLeft: expanded ? 8 : 0,
+            paddingRight: expanded ? 8 : 0,
+            transition: 'padding 0.2s ease',
+          }}
+        >
+          <UtilButton
+            icon={Search}
+            label="Search"
+            expanded={expanded}
+            onClick={onOpenCommandPalette}
+            extra={<Kbd>⌘K</Kbd>}
+          />
+          <UtilButton
+            icon={Settings}
+            label="Settings"
+            expanded={expanded}
+            onClick={onOpenSettings}
+          />
+        </div>
+      </nav>
+    </div>
   )
 }

@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { ChevronDown, Eye, EyeOff, Anchor as AnchorIcon, Search, X, LayoutGrid, List } from 'lucide-react'
-import { ToggleGroup } from '../../components/shared/ToggleGroup'
 import { getEntityColor, ENTITY_TYPE_COLORS } from '../../config/entityTypes'
 import { getSourceConfig } from '../../config/sourceTypes'
 import type { ExploreViewMode, ExploreFilters, ClusterData, SourceConnectionType, SourceGraphAnchor } from '../../types/explore'
@@ -189,31 +188,41 @@ export function ExploreToolbar({
 
   return (
     <div
-      className="flex items-center shrink-0 gap-3"
+      className="flex items-center shrink-0"
       style={{
         background: 'var(--color-bg-card)',
         borderBottom: '1px solid var(--border-subtle)',
         padding: '8px 24px',
+        minHeight: 44,
+        gap: 8,
       }}
     >
-      {/* 1. Tab switcher: Anchors / Entities / Sources */}
-      <div className="flex" style={{ borderRadius: 10, overflow: 'hidden', flexShrink: 0 }}>
-        <ViewModeButton
-          label="Anchors"
-          active={viewMode === 'anchors'}
-          onClick={() => onViewModeChange('anchors')}
-        />
-        <ViewModeButton
-          label="Entities"
-          active={viewMode === 'entity-browser'}
-          onClick={() => onViewModeChange('entity-browser')}
-        />
-        <ViewModeButton
-          label="Sources"
-          active={viewMode === 'sources'}
-          onClick={() => onViewModeChange('sources')}
-        />
-      </div>
+      {/* 1. Tab switcher: Anchors / Entities / Sources — pill buttons */}
+      {(['anchors', 'entity-browser', 'sources'] as const).map(mode => {
+        const labels: Record<string, string> = { anchors: 'Anchors', 'entity-browser': 'Entities', sources: 'Sources' }
+        const isActive = viewMode === mode
+        return (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => onViewModeChange(mode)}
+            className="font-body font-semibold"
+            style={{
+              padding: '5px 13px',
+              borderRadius: 20,
+              fontSize: 12,
+              border: isActive ? '1px solid rgba(214,58,0,0.15)' : '1px solid var(--border-subtle)',
+              background: isActive ? 'var(--color-accent-50)' : 'transparent',
+              color: isActive ? 'var(--color-accent-500)' : 'var(--color-text-secondary)',
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+              flexShrink: 0,
+            }}
+          >
+            {labels[mode]}
+          </button>
+        )
+      })}
 
       <Divider />
 
@@ -224,22 +233,20 @@ export function ExploreToolbar({
             <button
               type="button"
               onClick={() => setAnchorOpen(prev => !prev)}
-              className="flex items-center gap-2 cursor-pointer font-body"
+              className="flex items-center gap-2 cursor-pointer font-body font-semibold"
               style={{
-                padding: '6px 12px',
+                padding: '5px 13px',
                 fontSize: 12,
-                fontWeight: 500,
-                borderRadius: 8,
-                border: '1px solid',
-                borderColor: activeAnchor
-                  ? 'rgba(214,58,0,0.3)'
-                  : 'var(--border-subtle)',
+                borderRadius: 20,
+                border: activeAnchor
+                  ? '1px solid rgba(214,58,0,0.15)'
+                  : '1px solid var(--border-subtle)',
                 background: activeAnchor
                   ? 'var(--color-accent-50)'
                   : 'transparent',
                 color: activeAnchor
                   ? 'var(--color-accent-500)'
-                  : 'var(--color-text-body)',
+                  : 'var(--color-text-secondary)',
                 transition: 'all 0.15s ease',
                 whiteSpace: 'nowrap',
               }}
@@ -352,13 +359,14 @@ export function ExploreToolbar({
           <button
             type="button"
             onClick={() => setSpotlightOpen(prev => !prev)}
-            className="flex items-center gap-1.5 cursor-pointer font-body"
+            className="flex items-center gap-1.5 cursor-pointer font-body font-semibold"
             style={{
-              padding: '6px 12px',
+              padding: '5px 13px',
               fontSize: 12,
-              fontWeight: 500,
-              borderRadius: 8,
-              border: '1px solid var(--border-subtle)',
+              borderRadius: 20,
+              border: filters.spotlightEntityType
+                ? '1px solid rgba(214,58,0,0.15)'
+                : '1px solid var(--border-subtle)',
               background: filters.spotlightEntityType
                 ? 'var(--color-accent-50)'
                 : 'transparent',
@@ -474,13 +482,14 @@ export function ExploreToolbar({
             <button
               type="button"
               onClick={() => setNbEdgeOpen(prev => !prev)}
-              className="flex items-center gap-1.5 cursor-pointer font-body"
+              className="flex items-center gap-1.5 cursor-pointer font-body font-semibold"
               style={{
-                padding: '6px 12px',
+                padding: '5px 13px',
                 fontSize: 12,
-                fontWeight: 500,
-                borderRadius: 8,
-                border: '1px solid var(--border-subtle)',
+                borderRadius: 20,
+                border: visibleEdgeTypes.size < 3
+                  ? '1px solid rgba(214,58,0,0.15)'
+                  : '1px solid var(--border-subtle)',
                 background: visibleEdgeTypes.size < 3 ? 'var(--color-accent-50)' : 'transparent',
                 color: visibleEdgeTypes.size < 3 ? 'var(--color-accent-500)' : 'var(--color-text-secondary)',
                 transition: 'all 0.15s ease',
@@ -546,16 +555,16 @@ export function ExploreToolbar({
             <button
               type="button"
               onClick={() => setSrcTypeOpen(prev => !prev)}
-              className="flex items-center gap-1.5 cursor-pointer font-body"
+              className="flex items-center gap-1.5 cursor-pointer font-body font-semibold"
               style={{
-                padding: '6px 12px',
+                padding: '5px 13px',
                 fontSize: 12,
-                fontWeight: 500,
-                borderRadius: 8,
-                border: '1px solid',
-                borderColor: activeSourceTypeCount > 0 ? 'rgba(214,58,0,0.3)' : 'var(--border-subtle)',
+                borderRadius: 20,
+                border: activeSourceTypeCount > 0
+                  ? '1px solid rgba(214,58,0,0.15)'
+                  : '1px solid var(--border-subtle)',
                 background: activeSourceTypeCount > 0 ? 'var(--color-accent-50)' : 'transparent',
-                color: activeSourceTypeCount > 0 ? 'var(--color-accent-500)' : 'var(--color-text-body)',
+                color: activeSourceTypeCount > 0 ? 'var(--color-accent-500)' : 'var(--color-text-secondary)',
                 transition: 'all 0.15s ease',
                 whiteSpace: 'nowrap',
               }}
@@ -615,16 +624,16 @@ export function ExploreToolbar({
             <button
               type="button"
               onClick={() => setConnTypeOpen(prev => !prev)}
-              className="flex items-center gap-1.5 cursor-pointer font-body"
+              className="flex items-center gap-1.5 cursor-pointer font-body font-semibold"
               style={{
-                padding: '6px 12px',
+                padding: '5px 13px',
                 fontSize: 12,
-                fontWeight: 500,
-                borderRadius: 8,
-                border: '1px solid',
-                borderColor: activeConnTypeCount > 0 ? 'rgba(214,58,0,0.3)' : 'var(--border-subtle)',
+                borderRadius: 20,
+                border: activeConnTypeCount > 0
+                  ? '1px solid rgba(214,58,0,0.15)'
+                  : '1px solid var(--border-subtle)',
                 background: activeConnTypeCount > 0 ? 'var(--color-accent-50)' : 'transparent',
-                color: activeConnTypeCount > 0 ? 'var(--color-accent-500)' : 'var(--color-text-body)',
+                color: activeConnTypeCount > 0 ? 'var(--color-accent-500)' : 'var(--color-text-secondary)',
                 transition: 'all 0.15s ease',
                 whiteSpace: 'nowrap',
               }}
@@ -682,16 +691,16 @@ export function ExploreToolbar({
             <button
               type="button"
               onClick={() => setSrcAnchorOpen(prev => !prev)}
-              className="flex items-center gap-2 cursor-pointer font-body"
+              className="flex items-center gap-2 cursor-pointer font-body font-semibold"
               style={{
-                padding: '6px 12px',
+                padding: '5px 13px',
                 fontSize: 12,
-                fontWeight: 500,
-                borderRadius: 8,
-                border: '1px solid',
-                borderColor: activeSourceAnchor ? 'rgba(180,83,9,0.4)' : 'var(--border-subtle)',
+                borderRadius: 20,
+                border: activeSourceAnchor
+                  ? '1px solid rgba(180,83,9,0.25)'
+                  : '1px solid var(--border-subtle)',
                 background: activeSourceAnchor ? 'rgba(180,83,9,0.08)' : 'transparent',
-                color: activeSourceAnchor ? '#b45309' : 'var(--color-text-body)',
+                color: activeSourceAnchor ? '#b45309' : 'var(--color-text-secondary)',
                 transition: 'all 0.15s ease',
                 whiteSpace: 'nowrap',
               }}
@@ -775,13 +784,12 @@ export function ExploreToolbar({
         <button
           type="button"
           onClick={onClearAllFilters}
-          className="flex items-center gap-1.5 cursor-pointer font-body"
+          className="flex items-center gap-1.5 cursor-pointer font-body font-semibold"
           style={{
-            padding: '5px 10px',
-            fontSize: 11,
-            fontWeight: 500,
-            borderRadius: 8,
-            border: '1px solid rgba(214,58,0,0.25)',
+            padding: '5px 13px',
+            fontSize: 12,
+            borderRadius: 20,
+            border: '1px solid rgba(214,58,0,0.15)',
             background: 'var(--color-accent-50)',
             color: 'var(--color-accent-500)',
             transition: 'all 0.15s ease',
@@ -796,13 +804,12 @@ export function ExploreToolbar({
         <button
           type="button"
           onClick={onToggleShowEdges}
-          className="flex items-center gap-1.5 cursor-pointer font-body"
+          className="flex items-center gap-1.5 cursor-pointer font-body font-semibold"
           title={showEdges ? 'Hide edges' : 'Show edges'}
           style={{
-            padding: '6px 12px',
+            padding: '5px 13px',
             fontSize: 12,
-            fontWeight: 500,
-            borderRadius: 8,
+            borderRadius: 20,
             border: '1px solid var(--border-subtle)',
             background: showEdges ? 'var(--color-semantic-blue-50)' : 'transparent',
             color: showEdges ? 'var(--color-semantic-blue-700)' : 'var(--color-text-secondary)',
@@ -829,9 +836,9 @@ export function ExploreToolbar({
               onChange={e => entityBrowser.setSearchQuery(e.target.value)}
               placeholder="Search entities…"
               style={{
-                width: 180, padding: '6px 26px 6px 28px',
+                width: 160, padding: '5px 26px 5px 28px',
                 fontFamily: 'var(--font-body)', fontSize: 12,
-                borderRadius: 8, border: '1px solid var(--border-subtle)',
+                borderRadius: 20, border: '1px solid var(--border-subtle)',
                 background: 'var(--color-bg-inset)', color: 'var(--color-text-primary)', outline: 'none',
               }}
             />
@@ -848,7 +855,7 @@ export function ExploreToolbar({
           {/* Entity Type filter */}
           <EbDropdown
             ref={ebTypeRef}
-            label="Entity Type"
+            label="Entity Types"
             isOpen={ebTypeOpen}
             onToggle={() => setEbTypeOpen(p => !p)}
             activeCount={entityBrowser.typeFilter.length}
@@ -864,11 +871,11 @@ export function ExploreToolbar({
             ))}
           </EbDropdown>
 
-          {/* Source filter */}
+          {/* Source Types filter */}
           {entityBrowser.allSourceTypes.length > 0 && (
             <EbDropdown
               ref={ebSrcRef}
-              label="Source"
+              label="Source Types"
               isOpen={ebSrcOpen}
               onToggle={() => setEbSrcOpen(p => !p)}
               activeCount={entityBrowser.srcFilter.length}
@@ -911,10 +918,11 @@ export function ExploreToolbar({
           {/* Clear filters */}
           {entityBrowser.activeFilterCount > 0 && (
             <button type="button" onClick={entityBrowser.clearAllFilters}
+              className="font-body font-semibold"
               style={{
-                padding: '5px 10px', fontSize: 11, fontWeight: 500, borderRadius: 8, cursor: 'pointer',
-                border: '1px solid rgba(214,58,0,0.25)', background: 'var(--color-accent-50)',
-                color: 'var(--color-accent-500)', fontFamily: 'var(--font-body)', whiteSpace: 'nowrap',
+                padding: '5px 13px', fontSize: 12, borderRadius: 20, cursor: 'pointer',
+                border: '1px solid rgba(214,58,0,0.15)', background: 'var(--color-accent-50)',
+                color: 'var(--color-accent-500)', whiteSpace: 'nowrap',
               }}
             >
               Clear ({entityBrowser.activeFilterCount})
@@ -925,7 +933,7 @@ export function ExploreToolbar({
           <div className="flex-1" />
 
           {/* Result count */}
-          <span style={{ fontFamily: 'var(--font-body)', fontSize: 11, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', flexShrink: 0 }}>
+          <span className="font-body" style={{ fontSize: 12, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', flexShrink: 0 }}>
             {entityBrowser.entities.length} result{entityBrowser.entities.length !== 1 ? 's' : ''}
           </span>
 
@@ -934,11 +942,11 @@ export function ExploreToolbar({
           {/* Sort selector */}
           <div ref={ebSortRef} style={{ position: 'relative', flexShrink: 0 }}>
             <button type="button" onClick={() => setEbSortOpen(p => !p)}
+              className="font-body font-semibold"
               style={{
-                display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 8,
+                display: 'flex', alignItems: 'center', gap: 5, padding: '5px 13px', borderRadius: 20,
                 border: '1px solid var(--border-subtle)', background: 'transparent',
-                fontFamily: 'var(--font-body)', fontSize: 11, fontWeight: 500,
-                color: 'var(--color-text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap',
+                fontSize: 12, color: 'var(--color-text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap',
               }}
             >
               {EB_SORT_OPTIONS.find(o => o.key === entityBrowser.sortBy)?.label}
@@ -969,15 +977,15 @@ export function ExploreToolbar({
           </div>
 
           {/* Grid / List toggle */}
-          <div style={{ display: 'flex', borderRadius: 7, overflow: 'hidden', border: '1px solid var(--border-subtle)', flexShrink: 0 }}>
+          <div style={{ display: 'flex', borderRadius: 20, overflow: 'hidden', border: '1px solid var(--border-subtle)', flexShrink: 0 }}>
             {([
-              { mode: 'grid' as const, icon: <LayoutGrid size={13} />, title: 'Grid view' },
-              { mode: 'list' as const, icon: <List size={13} />, title: 'List view' },
+              { mode: 'grid' as const, icon: <LayoutGrid size={12} />, title: 'Grid view' },
+              { mode: 'list' as const, icon: <List size={12} />, title: 'List view' },
             ]).map(({ mode, icon, title }) => (
               <button key={mode} type="button" title={title} onClick={() => entityBrowser.setViewMode(mode)}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  width: 28, height: 28, border: 'none', cursor: 'pointer',
+                  width: 26, height: 26, border: 'none', cursor: 'pointer',
                   background: entityBrowser.viewMode === mode ? 'var(--color-accent-500)' : 'transparent',
                   color: entityBrowser.viewMode === mode ? '#ffffff' : 'var(--color-text-secondary)',
                   transition: 'background 0.15s ease, color 0.15s ease',
@@ -993,15 +1001,31 @@ export function ExploreToolbar({
       {/* Spacer (non-entity-browser modes) */}
       {viewMode !== 'entity-browser' && <div className="flex-1" />}
 
-      {/* 4. Right section: Recency (not shown in entity-browser mode) */}
-      {viewMode !== 'entity-browser' && (
-        <ToggleGroup
-          options={RECENCY_OPTIONS}
-          value={filters.recency}
-          onChange={onRecencyChange}
-          style={{ minWidth: 180 }}
-        />
-      )}
+      {/* 4. Right section: Recency pills (not shown in entity-browser mode) */}
+      {viewMode !== 'entity-browser' && RECENCY_OPTIONS.map(opt => {
+        const isActive = filters.recency === opt.key
+        return (
+          <button
+            key={opt.key}
+            type="button"
+            onClick={() => onRecencyChange(opt.key)}
+            className="font-body font-semibold"
+            style={{
+              padding: '5px 13px',
+              borderRadius: 20,
+              fontSize: 12,
+              border: isActive ? '1px solid rgba(214,58,0,0.15)' : '1px solid var(--border-subtle)',
+              background: isActive ? 'var(--color-accent-50)' : 'transparent',
+              color: isActive ? 'var(--color-accent-500)' : 'var(--color-text-secondary)',
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+              flexShrink: 0,
+            }}
+          >
+            {opt.label}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -1025,12 +1049,13 @@ const EbDropdown = forwardRef<
 >(({ label, isOpen, onToggle, activeCount, children }, ref) => (
   <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
     <button type="button" onClick={onToggle}
+      className="font-body font-semibold"
       style={{
-        display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 8, cursor: 'pointer',
-        border: `1px solid ${activeCount > 0 ? 'rgba(214,58,0,0.3)' : 'var(--border-subtle)'}`,
+        display: 'flex', alignItems: 'center', gap: 5, padding: '5px 13px', borderRadius: 20, cursor: 'pointer',
+        border: activeCount > 0 ? '1px solid rgba(214,58,0,0.15)' : '1px solid var(--border-subtle)',
         background: activeCount > 0 ? 'var(--color-accent-50)' : 'transparent',
-        color: activeCount > 0 ? 'var(--color-accent-500)' : 'var(--color-text-body)',
-        fontFamily: 'var(--font-body)', fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap',
+        color: activeCount > 0 ? 'var(--color-accent-500)' : 'var(--color-text-secondary)',
+        fontSize: 12, whiteSpace: 'nowrap',
         transition: 'all 0.15s ease',
       }}
     >
@@ -1068,42 +1093,6 @@ function EbFilterOption({ label, dot, icon, isActive, onClick }: {
     >
       {dot && <span style={{ width: 6, height: 6, borderRadius: '50%', background: dot, flexShrink: 0 }} />}
       {icon && <span style={{ fontSize: 12 }}>{icon}</span>}
-      {label}
-    </button>
-  )
-}
-
-// ─── View Mode Button ────────────────────────────────────────────────────────
-
-function ViewModeButton({
-  label,
-  active,
-  onClick,
-}: {
-  label: string
-  active: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="cursor-pointer font-display"
-      style={{
-        padding: '7px 20px',
-        fontSize: 13,
-        fontWeight: 700,
-        border: 'none',
-        background: active
-          ? 'var(--color-accent-500)'
-          : 'var(--color-bg-inset)',
-        color: active
-          ? '#ffffff'
-          : 'var(--color-text-secondary)',
-        transition: 'background 0.15s ease, color 0.15s ease',
-        letterSpacing: '-0.01em',
-      }}
-    >
       {label}
     </button>
   )
