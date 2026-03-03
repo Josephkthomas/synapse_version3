@@ -4,7 +4,6 @@ import { useAutomationSources } from '../hooks/useAutomationSources'
 import { SourceCard } from '../components/automate/SourceCard'
 import { SourceDetailPanel } from '../components/automate/SourceDetailPanel'
 import { NewSourcePanel } from '../components/automate/NewSourcePanel'
-import { BackfillCard } from '../components/automate/BackfillCard'
 import type { AutomationSource } from '../services/automationSources'
 
 type FilterType = 'all' | 'youtube-channel' | 'youtube-playlist' | 'meeting'
@@ -236,8 +235,7 @@ export function AutomateView() {
         >
           <div style={{ padding: '20px 36px' }}>
 
-          {/* ── Backfill Card ─────────────────────────────────────────── */}
-          <BackfillCard />
+          {/* BackfillCard removed — backfill runs via cron now */}
 
           {/* ── Error ───────────────────────────────────────────────────── */}
           {error && (
