@@ -181,23 +181,28 @@ export async function fetchAutomationSources(): Promise<AutomationSource[]> {
       const provider = (meta?.provider as string) || 'unknown'
       providerCounts.set(provider, (providerCounts.get(provider) ?? 0) + 1)
     }
-    // Use the most common provider
+    // Use the most common provider; default to Circleback since it's the only active integration
     const topProvider = [...providerCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'unknown'
+    const resolvedProvider = topProvider === 'unknown' ? 'circleback' : topProvider
 
     const PROVIDER_CONFIG: Record<string, { name: string; iconUrl?: string; description: string }> = {
       circleback: { name: 'Circleback', iconUrl: '/logos/circleback.jpeg', description: 'Meeting transcripts via Circleback' },
       fireflies: { name: 'Fireflies', iconUrl: '/logos/fireflies.jpeg', description: 'Meeting transcripts via Fireflies' },
       otter: { name: 'Otter.ai', description: 'Meeting transcripts via Otter.ai' },
-      unknown: { name: 'Meeting Transcripts', description: 'Auto-captured meeting transcripts via connected services' },
     }
     const fallback: { name: string; iconUrl?: string; description: string } = { name: 'Meeting Transcripts', description: 'Auto-captured meeting transcripts via connected services' }
-    const providerInfo = PROVIDER_CONFIG[topProvider] ?? fallback
+    const providerInfo = PROVIDER_CONFIG[resolvedProvider] ?? fallback
+
+    // Check for user-customized name (stored in localStorage for synthetic source)
+    const customMeetingName = typeof window !== 'undefined'
+      ? localStorage.getItem('synapse:meeting-integration-name')
+      : null
 
     sources.push({
       id: 'meeting-integration',
       category: 'meeting',
-      name: providerInfo.name,
-      handle: topProvider !== 'unknown' ? 'Meeting Integration' : undefined,
+      name: customMeetingName || providerInfo.name,
+      handle: 'Meeting Integration',
       description: providerInfo.description,
       status: 'connected',
       meetingsIngested: meetingCount,
@@ -780,5 +785,8 @@ export async function updateSourceName(
       .update({ playlist_name: name, updated_at: new Date().toISOString() })
       .eq('id', sourceId)
     if (error) throw new Error(error.message)
+  } else if (category === 'meeting') {
+    // Meeting source is synthetic — store custom name in localStorage
+    localStorage.setItem('synapse:meeting-integration-name', name)
   }
 }

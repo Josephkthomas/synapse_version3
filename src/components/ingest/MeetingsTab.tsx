@@ -19,11 +19,11 @@ const BASE_INTEGRATIONS: Omit<IntegrationConfig, 'status'>[] = [
     description: 'Auto-capture meeting transcripts',
     comingSoon: false,
     setupInstructions: [
-      'Go to your Circleback account settings.',
-      'Navigate to Integrations → Webhooks.',
-      'Click "Add Webhook" and paste your Synapse webhook URL.',
-      'Select "Transcript Ready" as the trigger event.',
-      'Save the webhook. New transcripts will auto-import.',
+      'Open Circleback and go to Automations.',
+      'Click "Create Automation" and set your meeting conditions.',
+      'Select "Send webhook request" as the action.',
+      'Paste your Synapse webhook URL (found in Automate → Connect Source → Circleback).',
+      'Save the automation. Meeting transcripts will auto-import after each meeting.',
     ],
   },
   {

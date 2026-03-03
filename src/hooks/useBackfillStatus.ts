@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../services/supabase'
+import { useAuth } from './useAuth'
 
 interface BackfillLastRun {
   timestamp: string
@@ -45,6 +46,7 @@ function writeLastRun(processed: number, errors: number) {
 }
 
 export function useBackfillStatus() {
+  const { user } = useAuth()
   const [totalSources, setTotalSources] = useState(0)
   const [missingSummaries, setMissingSummaries] = useState(0)
   const [isRunning, setIsRunning] = useState(false)
@@ -54,18 +56,21 @@ export function useBackfillStatus() {
   const abortRef = useRef<AbortController | null>(null)
 
   const fetchCounts = useCallback(async () => {
+    if (!user) return
     const [totalRes, missingRes] = await Promise.all([
       supabase
         .from('knowledge_sources')
-        .select('id', { count: 'exact', head: true }),
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.id),
       supabase
         .from('knowledge_sources')
         .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.id)
         .is('summary', null),
     ])
     setTotalSources(totalRes.count ?? 0)
     setMissingSummaries(missingRes.count ?? 0)
-  }, [])
+  }, [user])
 
   // Initial fetch + auto-refresh every 30s
   useEffect(() => {

@@ -102,6 +102,10 @@ export async function fetchActivityFeed(
     allNodeIds.push(n.id)
   }
 
+  // Step 2.5: Filter out sources that haven't been extracted yet (no nodes)
+  // This prevents unprocessed sources (e.g. newly ingested meetings) from appearing
+  const extractedSources = pageSources.filter(s => (nodesBySource.get(s.id)?.length ?? 0) > 0)
+
   // Step 3: Batch fetch edges involving any of these nodes
   let rawEdges: PartialEdge[] = []
 
@@ -164,13 +168,13 @@ export async function fetchActivityFeed(
   // Combined source map: page sources + external fetched sources
   // This resolves titles for cross-page-source edges (source A node → source B node on same page)
   const combinedSourceMap = new Map<string, SourceMeta>()
-  for (const s of pageSources) {
+  for (const s of extractedSources) {
     combinedSourceMap.set(s.id, { id: s.id, title: s.title ?? null, source_type: s.source_type ?? null })
   }
   otherSourceMap.forEach((v, k) => combinedSourceMap.set(k, v))
 
-  // Assemble FeedItems
-  const items: FeedItem[] = pageSources.map(source => {
+  // Assemble FeedItems (only extracted sources)
+  const items: FeedItem[] = extractedSources.map(source => {
     const sourceNodes = nodesBySource.get(source.id) ?? []
     const sourceNodeIdSet = new Set(sourceNodes.map(n => n.id))
 

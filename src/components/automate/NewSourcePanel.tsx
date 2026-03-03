@@ -3,6 +3,7 @@ import { ArrowLeft, Copy, Check } from 'lucide-react'
 import type { AutomationSource, SourceSettings } from '../../services/automationSources'
 import { addYouTubeChannel, addYouTubePlaylist, DEFAULT_SOURCE_SETTINGS } from '../../services/automationSources'
 import { useSettings } from '../../hooks/useSettings'
+import { useAuth } from '../../hooks/useAuth'
 import { EXTRACTION_MODES, ANCHOR_EMPHASIS_LEVELS } from '../../config/extractionModes'
 import { getEntityColor } from '../../config/entityTypes'
 
@@ -307,10 +308,12 @@ function StepConfigure({ sourceType, onBack, onSourceAdded }: StepConfigureProps
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const { user } = useAuth()
 
-  const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string) ?? ''
   const isMeeting = sourceType === 'circleback' || sourceType === 'firefly'
-  const webhookUrl = isMeeting ? `${supabaseUrl}/functions/v1/${sourceType}-webhook` : ''
+  const webhookUrl = isMeeting && user
+    ? `${window.location.origin}/api/meetings/webhook?uid=${user.id}`
+    : ''
 
   const sourceInfo = SOURCE_TYPES.find(s => s.id === sourceType)!
 
@@ -422,8 +425,9 @@ function StepConfigure({ sourceType, onBack, onSourceAdded }: StepConfigureProps
           <div style={{ marginBottom: 24 }}>
             <SL>Webhook URL</SL>
             <p className="font-body" style={{ fontSize: 12, color: 'var(--color-text-body)', marginBottom: 12, lineHeight: 1.5 }}>
-              Paste this URL into your <strong>{sourceInfo.label}</strong> settings under{' '}
-              <em>Integrations → Webhook</em>. Meeting transcripts will be automatically sent to Synapse after each meeting.
+              In <strong>{sourceInfo.label}</strong>, go to <em>Automations → Create Automation</em>, add your
+              conditions, then select <em>Send webhook request</em> and paste this URL. Meeting transcripts will
+              be automatically sent to Synapse after each meeting.
             </p>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div
