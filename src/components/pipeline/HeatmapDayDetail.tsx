@@ -1,17 +1,10 @@
 import { X } from 'lucide-react'
+import { ProviderIcon } from '../shared/ProviderIcon'
 import type { HeatmapCell } from '../../types/pipeline'
 
 interface HeatmapDayDetailProps {
   cell: HeatmapCell
   onClose: () => void
-}
-
-const SOURCE_EMOJIS: Record<string, string> = {
-  YouTube: '▶',
-  Meeting: '🎙',
-  Document: '📋',
-  Note: '✏️',
-  Research: '🔬',
 }
 
 export function HeatmapDayDetail({ cell, onClose }: HeatmapDayDetailProps) {
@@ -99,7 +92,7 @@ export function HeatmapDayDetail({ cell, onClose }: HeatmapDayDetailProps) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {sourceEntries.map(([type, count]) => (
               <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 14 }}>{SOURCE_EMOJIS[type] ?? '📄'}</span>
+                <ProviderIcon sourceType={type} size={18} borderRadius={4} />
                 <span className="font-body" style={{ fontSize: 11, fontWeight: 500, color: 'var(--color-text-body)', flex: 1 }}>
                   {type}
                 </span>

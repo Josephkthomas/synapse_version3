@@ -18,6 +18,8 @@ const PAGE_SIZE = 20
 function mapSessionToItem(s: PipelineSession): PipelineHistoryItem {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const queueStatus = (s as any)._queueStatus as string | undefined
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const provider = (s as any)._provider as string | undefined
   const isFailed = !queueStatus && s.entity_count === 0 && s.extraction_duration_ms !== null
   const isProcessing = !!queueStatus
 
@@ -42,6 +44,7 @@ function mapSessionToItem(s: PipelineSession): PipelineHistoryItem {
     id: s.id,
     title: s.source_name ?? 'Untitled',
     sourceType: (s.source_type ?? 'Document') as PipelineHistoryItem['sourceType'],
+    provider: provider ?? (s.source_type === 'YouTube' ? 'youtube' : null),
     mode: (s.extraction_mode ?? 'comprehensive') as PipelineHistoryItem['mode'],
     emphasis: (s.anchor_emphasis ?? 'standard') as PipelineHistoryItem['emphasis'],
     status,

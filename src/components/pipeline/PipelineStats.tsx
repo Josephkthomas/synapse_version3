@@ -1,18 +1,11 @@
 import { TrendingUp, BarChart3, Clock, Star, AlertTriangle, Target } from 'lucide-react'
+import { ProviderIcon } from '../shared/ProviderIcon'
 import type { PipelineMetrics, PipelineHistoryItem } from '../../types/pipeline'
 
 interface PipelineStatsProps {
   metrics: PipelineMetrics
   allItems: PipelineHistoryItem[]
   loading: boolean
-}
-
-const SOURCE_EMOJIS: Record<string, string> = {
-  YouTube: '▶',
-  Meeting: '🎙',
-  Document: '📋',
-  Note: '✏️',
-  Research: '🔬',
 }
 
 export function PipelineStats({ metrics, allItems, loading }: PipelineStatsProps) {
@@ -151,7 +144,7 @@ export function PipelineStats({ metrics, allItems, loading }: PipelineStatsProps
               return (
                 <div key={type}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-                    <span style={{ fontSize: 13 }}>{SOURCE_EMOJIS[type] ?? '📄'}</span>
+                    <ProviderIcon sourceType={type} size={18} borderRadius={4} />
                     <span className="font-body" style={{ fontSize: 11, fontWeight: 500, color: 'var(--color-text-body)', flex: 1 }}>
                       {type}
                     </span>

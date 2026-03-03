@@ -1652,6 +1652,60 @@ export interface PipelineSession {
   _provider?: string | null
 }
 
+/**
+ * Lazy-load chunk count + cross-connection count for a completed extraction.
+ * Derives source_id from the first extracted node, then:
+ *   - Counts rows in source_chunks for that source
+ *   - Counts edges where one endpoint is outside the extracted node set
+ */
+export async function fetchExtractionEnrichment(
+  extractedNodeIds: string[],
+  extractedEdgeIds: string[]
+): Promise<{ chunkCount: number; crossConnections: number }> {
+  if (!extractedNodeIds.length) return { chunkCount: 0, crossConnections: 0 }
+
+  try {
+    // Get source_id from the first extracted node
+    const { data: nodeData } = await supabase
+      .from('knowledge_nodes')
+      .select('source_id')
+      .in('id', extractedNodeIds.slice(0, 1))
+      .single()
+
+    let chunkCount = 0
+    if (nodeData?.source_id) {
+      const { count } = await supabase
+        .from('source_chunks')
+        .select('id', { count: 'exact', head: true })
+        .eq('source_id', nodeData.source_id)
+      chunkCount = count ?? 0
+    }
+
+    // Cross-connections: edges where one node is outside this extraction's node set
+    let crossConnections = 0
+    if (extractedEdgeIds.length > 0) {
+      const { data: edges } = await supabase
+        .from('knowledge_edges')
+        .select('source_node_id, target_node_id')
+        .in('id', extractedEdgeIds)
+
+      if (edges) {
+        const nodeIdSet = new Set(extractedNodeIds)
+        crossConnections = edges.filter(
+          e =>
+            (nodeIdSet.has(e.source_node_id) && !nodeIdSet.has(e.target_node_id)) ||
+            (!nodeIdSet.has(e.source_node_id) && nodeIdSet.has(e.target_node_id))
+        ).length
+      }
+    }
+
+    return { chunkCount, crossConnections }
+  } catch (err) {
+    console.warn('[supabase] fetchExtractionEnrichment failed:', err)
+    return { chunkCount: 0, crossConnections: 0 }
+  }
+}
+
 export async function fetchPipelineHistory(
   userId: string,
   limit: number = 20,

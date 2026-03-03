@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { X, MessageSquare, GitBranch, RefreshCw, ArrowRight, Search, Link2, ChevronRight, Loader2 } from 'lucide-react'
 import { getSourceConfig } from '../../config/sourceTypes'
 import { getEntityColor } from '../../config/entityTypes'
+import { ProviderIcon } from '../shared/ProviderIcon'
 import { useSettings } from '../../hooks/useSettings'
 import { fetchNodeById, supabase } from '../../services/supabase'
 import { stripMarkdown } from '../../utils/stripMarkdown'
@@ -589,6 +590,7 @@ export function HomeFeedDetail({ item, onClose, onSourceSelect }: HomeFeedDetail
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const cfg = getSourceConfig(item.source.source_type)
+  const sourceProvider = (item.source.metadata as Record<string, unknown> | null)?.provider as string | undefined
 
   // Reset summary state when item changes
   useEffect(() => {
@@ -744,12 +746,7 @@ export function HomeFeedDetail({ item, onClose, onSourceSelect }: HomeFeedDetail
         {/* ── Metadata card (header + actions) ── */}
         <SectionCard>
           <div className="flex items-start gap-3">
-            <div
-              className="flex items-center justify-center shrink-0"
-              style={{ width: 36, height: 36, borderRadius: 8, background: cfg.color + '1A', fontSize: 16 }}
-            >
-              {cfg.icon}
-            </div>
+            <ProviderIcon sourceType={item.source.source_type} provider={sourceProvider} size={36} />
             <div className="flex-1 min-w-0">
               <h2
                 className="font-display font-bold"

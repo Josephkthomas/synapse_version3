@@ -1,5 +1,5 @@
 import { X, Clock, Loader2, Check, CircleDashed, Play } from 'lucide-react'
-import { getSourceConfig } from '../../config/sourceTypes'
+import { ProviderIcon } from '../shared/ProviderIcon'
 import type { PipelineHistoryItem } from '../../types/pipeline'
 
 interface ActiveItemDetailProps {
@@ -62,7 +62,6 @@ function getStageStatus(stageId: string, currentStep: string | undefined): 'done
 }
 
 export function ActiveItemDetail({ item, onClose, onProcessNow, processingNow }: ActiveItemDetailProps) {
-  const sourceConfig = getSourceConfig(item.sourceType)
   // When processingNow is true, show optimistic "in progress" even if DB still says pending
   const isOptimisticProcessing = !!processingNow && item.status === 'pending'
   const isQueued = item.status === 'pending' && !isOptimisticProcessing
@@ -99,21 +98,7 @@ export function ActiveItemDetail({ item, onClose, onProcessNow, processingNow }:
 
       {/* Header */}
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 20 }}>
-        <div
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: 10,
-            background: `${sourceConfig.color}12`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 18,
-            flexShrink: 0,
-          }}
-        >
-          {sourceConfig.icon}
-        </div>
+        <ProviderIcon sourceType={item.sourceType} provider={item.provider} size={40} borderRadius={10} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <h2
             className="font-display"

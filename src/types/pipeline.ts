@@ -7,6 +7,7 @@ export interface PipelineHistoryItem {
   mode: 'comprehensive' | 'strategic' | 'actionable' | 'relational'
   emphasis: 'passive' | 'standard' | 'aggressive'
   status: 'pending' | 'processing' | 'extracting' | 'completed' | 'failed'
+  provider?: string | null // Provider that ingested this (e.g. 'youtube', 'circleback', 'fireflies')
   step?: string // For active items: 'queued' | 'fetching_transcript' | 'extracting' | 'saving'
   error?: string // For failed items
   createdAt: string

@@ -22,3 +22,25 @@ export function getSourceConfig(sourceType: string | null | undefined): SourceTy
   if (!sourceType) return DEFAULT_SOURCE_CONFIG
   return SOURCE_TYPE_CONFIG[sourceType] ?? DEFAULT_SOURCE_CONFIG
 }
+
+// ─── Provider Config (for provider-specific logos) ──────────────────────────
+
+export interface ProviderConfig {
+  logo: string | null
+  label: string
+  color: string
+}
+
+export const PROVIDER_CONFIG: Record<string, ProviderConfig> = {
+  youtube:    { logo: '/logos/youtube.svg',     label: 'YouTube',    color: '#ef4444' },
+  circleback: { logo: '/logos/circleback.jpeg', label: 'Circleback', color: '#3b82f6' },
+  fireflies:  { logo: '/logos/fireflies.svg',   label: 'Fireflies',  color: '#6366f1' },
+  otter:      { logo: null,                     label: 'Otter.ai',   color: '#0ea5e9' },
+  meetgeek:   { logo: '/logos/meetgeek.jpeg',   label: 'MeetGeek',   color: '#8b5cf6' },
+  tldv:       { logo: '/logos/tldv.svg',        label: 'tl;dv',      color: '#ec4899' },
+}
+
+export function getProviderConfig(provider: string | null | undefined): ProviderConfig | null {
+  if (!provider) return null
+  return PROVIDER_CONFIG[provider.toLowerCase()] ?? null
+}

@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { Play } from 'lucide-react'
 import type { AutomationSource } from '../../services/automationSources'
 import { StatusLabel } from '../shared/StatusIndicator'
+import { ProviderIcon } from '../shared/ProviderIcon'
 
 interface SourceCardProps {
   source: AutomationSource
@@ -10,21 +10,6 @@ interface SourceCardProps {
   index?: number
 }
 
-function getCategoryColor(category: AutomationSource['category']): string {
-  if (category === 'youtube-playlist') return '#ef4444'
-  return '#3b82f6'
-}
-
-function CategoryIcon({ category, color, iconUrl }: { category: AutomationSource['category']; color: string; iconUrl?: string }) {
-  if (iconUrl) {
-    return <img src={iconUrl} alt="" width={15} height={15} style={{ borderRadius: 3, objectFit: 'cover' }} />
-  }
-  if (category === 'youtube-playlist') {
-    return <Play size={15} strokeWidth={1.5} style={{ color }} />
-  }
-  // Meeting fallback: microphone emoji
-  return <span style={{ fontSize: 13, lineHeight: 1 }}>🎙</span>
-}
 
 function getModeColor(mode: string): string {
   switch (mode) {
@@ -38,7 +23,6 @@ function getModeColor(mode: string): string {
 
 export function SourceCard({ source, isSelected, onClick, index = 0 }: SourceCardProps) {
   const [hovered, setHovered] = useState(false)
-  const catColor = getCategoryColor(source.category)
   const queueCount = source.queue.pending + source.queue.processing
   const modeColor = getModeColor(source.mode)
 
@@ -74,20 +58,11 @@ export function SourceCard({ source, isSelected, onClick, index = 0 }: SourceCar
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
         {/* Left: icon + name */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 8,
-              background: catColor + '1f',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >
-            <CategoryIcon category={source.category} color={catColor} iconUrl={source.iconUrl} />
-          </div>
+          <ProviderIcon
+            sourceType={source.category === 'meeting' ? 'Meeting' : 'YouTube'}
+            provider={source.provider ?? (source.category === 'youtube-playlist' ? 'youtube' : undefined)}
+            size={32}
+          />
           <div>
             <div
               className="font-display"

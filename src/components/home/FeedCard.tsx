@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { ArrowRight } from 'lucide-react'
-import { getSourceConfig } from '../../config/sourceTypes'
 import { useGraphContext } from '../../hooks/useGraphContext'
+import { ProviderIcon } from '../shared/ProviderIcon'
 import { fetchNodeById, fetchSourceById } from '../../services/supabase'
 import { stripMarkdown } from '../../utils/stripMarkdown'
 import type { FeedItem } from '../../types/feed'
@@ -34,7 +34,7 @@ interface FeedCardProps {
 export function FeedCard({ item, animDelay, isSelected, onItemSelect }: FeedCardProps) {
   const { setRightPanelContent } = useGraphContext()
 
-  const cfg = getSourceConfig(item.source.source_type)
+  const sourceProvider = (item.source.metadata as Record<string, unknown> | null)?.provider as string | undefined
 
   const handleNodeClick = async (nodeId: string, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -124,12 +124,7 @@ export function FeedCard({ item, animDelay, isSelected, onItemSelect }: FeedCard
         onMouseEnter={e => { ;(e.currentTarget as HTMLButtonElement).style.background = 'var(--color-bg-inset)' }}
         onMouseLeave={e => { ;(e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
       >
-        <div
-          className="flex items-center justify-center shrink-0"
-          style={{ width: 26, height: 26, borderRadius: 6, background: cfg.color + '1A', fontSize: 12 }}
-        >
-          {cfg.icon}
-        </div>
+        <ProviderIcon sourceType={item.source.source_type} provider={sourceProvider} size={26} borderRadius={6} />
         <div className="min-w-0 flex-1">
           <p
             className="font-display font-bold text-text-primary"

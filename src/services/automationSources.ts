@@ -34,6 +34,7 @@ export interface AutomationSource {
   linkedAnchors: string[]
   customInstructions?: string
   iconUrl?: string
+  provider?: string
   queue: {
     pending: number
     processing: number
@@ -194,6 +195,7 @@ export async function fetchAutomationSources(): Promise<AutomationSource[]> {
       emphasis: 'standard',
       linkedAnchors: [],
       iconUrl: providerInfo.iconUrl,
+      provider: resolvedProvider,
       queue: { pending: meetingPending, processing: meetingProcessing, complete: meetingComplete, failed: meetingFailed },
     })
   }

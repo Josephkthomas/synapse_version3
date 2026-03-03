@@ -3,7 +3,7 @@ import { Play } from 'lucide-react'
 import { EntityBadge } from '../shared/EntityBadge'
 import { StarRating } from '../shared/StarRating'
 import { HistoryCardStepBar } from './HistoryCardStepBar'
-import { getSourceConfig } from '../../config/sourceTypes'
+import { ProviderIcon } from '../shared/ProviderIcon'
 import type { PipelineHistoryItem } from '../../types/pipeline'
 
 interface HistoryCardProps {
@@ -33,7 +33,6 @@ function formatRelativeTime(dateStr: string): string {
 
 export function HistoryCard({ item, isSelected, onClick, onRate, onProcessNow, index }: HistoryCardProps) {
   const [hovered, setHovered] = useState(false)
-  const sourceConfig = getSourceConfig(item.sourceType)
 
   const isActive = item.status === 'pending' || item.status === 'processing' || item.status === 'extracting'
   const isFailed = item.status === 'failed'
@@ -62,20 +61,7 @@ export function HistoryCard({ item, isSelected, onClick, onRate, onProcessNow, i
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
         {/* Source icon */}
         <div style={{ position: 'relative', flexShrink: 0 }}>
-          <div
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 8,
-              background: `${sourceConfig.color}12`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 16,
-            }}
-          >
-            {sourceConfig.icon}
-          </div>
+          <ProviderIcon sourceType={item.sourceType} provider={item.provider} size={36} />
           {isActive && (
             <div
               style={{
