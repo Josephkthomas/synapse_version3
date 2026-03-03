@@ -12,6 +12,21 @@ const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 const MAX_ITEMS_PER_BATCH = 2;
 const MAX_CONTENT_CHARS = 100_000;
+const GEMINI_MAX_RETRIES = 3;
+
+async function fetchWithRetry(url: string, options: RequestInit, retries = GEMINI_MAX_RETRIES): Promise<Response> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const response = await fetch(url, options);
+    if (response.status === 429 && attempt < retries) {
+      const waitMs = Math.min(2000 * Math.pow(2, attempt), 15000);
+      console.log(`[meetings/process] Gemini 429 rate limit, retrying in ${waitMs}ms (attempt ${attempt + 1}/${retries})`);
+      await new Promise(r => setTimeout(r, waitMs));
+      continue;
+    }
+    return response;
+  }
+  throw new Error('Gemini request failed after retries');
+}
 
 // ─── TYPES ─────────────────────────────────────────────────────────────────────
 
@@ -181,7 +196,7 @@ async function extractEntities(
   content: string,
   systemPrompt: string
 ): Promise<ExtractionResult> {
-  const response = await fetch(
+  const response = await fetchWithRetry(
     `${GEMINI_BASE}/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
     {
       method: 'POST',
@@ -479,7 +494,7 @@ Return ONLY valid JSON:
 
 Return an empty array if no genuine cross-source connections exist.`;
 
-          const crossResponse = await fetch(
+          const crossResponse = await fetchWithRetry(
             `${GEMINI_BASE}/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
             {
               method: 'POST',

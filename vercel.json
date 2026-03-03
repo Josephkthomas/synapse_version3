@@ -16,12 +16,12 @@
       "schedule": "*/5 * * * *"
     },
     {
-      "path": "/api/summaries/backfill?batch_size=25",
-      "schedule": "* * * * *"
+      "path": "/api/summaries/backfill?batch_size=10",
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/meetings/process",
-      "schedule": "*/5 * * * *"
+      "schedule": "*/2 * * * *"
     }
   ]
 }
