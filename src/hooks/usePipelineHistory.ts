@@ -24,8 +24,16 @@ function mapSessionToItem(s: PipelineSession): PipelineHistoryItem {
   let status: PipelineHistoryItem['status'] = 'completed'
   let step: string | undefined
   if (isProcessing) {
-    status = queueStatus === 'pending' ? 'pending' : 'processing'
-    step = queueStatus === 'pending' ? 'queued' : queueStatus
+    if (queueStatus === 'pending') {
+      status = 'pending'
+      step = 'queued'
+    } else if (queueStatus === 'transcript_ready') {
+      status = 'processing'
+      step = 'transcript_ready'
+    } else {
+      status = 'processing'
+      step = queueStatus
+    }
   } else if (isFailed) {
     status = 'failed'
   }
@@ -78,6 +86,8 @@ export interface UsePipelineHistoryReturn {
   hasMore: boolean
   loadMore: () => void
   refetch: () => void
+  startPolling: () => void
+  stopPolling: () => void
   counts: FilterCounts
 }
 
@@ -138,6 +148,65 @@ export function usePipelineHistory(
   const refetch = useCallback(() => {
     fetchData(0, false)
   }, [fetchData])
+
+  // ── Auto-polling: poll every 5s when active items exist ──────────────────
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const hasActiveItems = useRef(false)
+  // Fast polling mode: triggered by "Process Now", polls every 3s then slows
+  const fastPollRef = useRef(false)
+
+  const clearPoll = useCallback(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current)
+      pollIntervalRef.current = null
+    }
+  }, [])
+
+  const startPolling = useCallback(() => {
+    fastPollRef.current = true
+    clearPoll()
+    // Fast poll every 3s — the interval auto-manages itself below
+    pollIntervalRef.current = setInterval(() => {
+      fetchData(0, false)
+    }, 3000)
+  }, [clearPoll, fetchData])
+
+  const stopPolling = useCallback(() => {
+    fastPollRef.current = false
+    clearPoll()
+  }, [clearPoll])
+
+  // Auto-manage polling based on whether active items exist
+  useEffect(() => {
+    const activeCount = queueItems.length
+    const hadActive = hasActiveItems.current
+    hasActiveItems.current = activeCount > 0
+
+    if (fastPollRef.current) {
+      // Fast polling is active — if all items completed, stop fast polling
+      if (activeCount === 0 && hadActive) {
+        fastPollRef.current = false
+        clearPoll()
+        // Do one final refetch to get completed state
+        fetchData(0, false)
+      }
+      return // Don't interfere with fast polling interval
+    }
+
+    if (activeCount > 0 && !pollIntervalRef.current) {
+      // Start background polling at 5s
+      pollIntervalRef.current = setInterval(() => {
+        fetchData(0, false)
+      }, 5000)
+    } else if (activeCount === 0 && pollIntervalRef.current) {
+      clearPoll()
+    }
+  }, [queueItems.length, clearPoll, fetchData])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => clearPoll()
+  }, [clearPoll])
 
   // Merge sessions + queue items into unified list
   // Sort queue items: meetings first (higher priority), then YouTube
@@ -212,6 +281,8 @@ export function usePipelineHistory(
     hasMore,
     loadMore,
     refetch,
+    startPolling,
+    stopPolling,
     counts,
   }
 }

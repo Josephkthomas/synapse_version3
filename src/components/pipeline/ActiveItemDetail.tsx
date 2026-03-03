@@ -34,6 +34,11 @@ const PIPELINE_STAGES = [
     description: 'Downloading and parsing the source content',
   },
   {
+    id: 'transcript_ready',
+    label: 'Transcript Ready',
+    description: 'Content fetched, waiting for extraction slot',
+  },
+  {
     id: 'extracting',
     label: 'Extracting Entities',
     description: 'AI is identifying entities, relationships, and insights',
@@ -58,7 +63,10 @@ function getStageStatus(stageId: string, currentStep: string | undefined): 'done
 
 export function ActiveItemDetail({ item, onClose, onProcessNow, processingNow }: ActiveItemDetailProps) {
   const sourceConfig = getSourceConfig(item.sourceType)
-  const isQueued = item.status === 'pending'
+  // When processingNow is true, show optimistic "in progress" even if DB still says pending
+  const isOptimisticProcessing = !!processingNow && item.status === 'pending'
+  const isQueued = item.status === 'pending' && !isOptimisticProcessing
+  const effectiveStep = isOptimisticProcessing ? 'fetching_transcript' : item.step
   const elapsedMs = Date.now() - new Date(item.createdAt).getTime()
   const elapsedSec = Math.floor(elapsedMs / 1000)
   const elapsedDisplay = elapsedSec < 60
@@ -66,7 +74,7 @@ export function ActiveItemDetail({ item, onClose, onProcessNow, processingNow }:
     : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`
 
   // Count completed stages for progress
-  const completedStages = PIPELINE_STAGES.filter(s => getStageStatus(s.id, item.step) === 'done').length
+  const completedStages = PIPELINE_STAGES.filter(s => getStageStatus(s.id, effectiveStep) === 'done').length
   const progressPct = Math.round((completedStages / PIPELINE_STAGES.length) * 100)
 
   return (
@@ -161,12 +169,12 @@ export function ActiveItemDetail({ item, onClose, onProcessNow, processingNow }:
             color: isQueued ? 'var(--color-text-secondary)' : 'var(--color-accent-600, #c2410c)',
           }}
         >
-          {isQueued ? 'Queued' : 'In Progress'}
+          {isQueued ? 'Queued' : isOptimisticProcessing ? 'Starting...' : 'In Progress'}
         </span>
       </div>
 
-      {/* Process Now button (for queued items) */}
-      {isQueued && onProcessNow && (
+      {/* Process Now button (for queued and transcript_ready items, hidden once processing starts) */}
+      {!processingNow && (isQueued || item.step === 'transcript_ready') && onProcessNow && (
         <button
           type="button"
           onClick={onProcessNow}
@@ -228,7 +236,7 @@ export function ActiveItemDetail({ item, onClose, onProcessNow, processingNow }:
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
         {PIPELINE_STAGES.map((stage, i) => {
-          const status = getStageStatus(stage.id, item.step)
+          const status = getStageStatus(stage.id, effectiveStep)
           const isLast = i === PIPELINE_STAGES.length - 1
 
           return (

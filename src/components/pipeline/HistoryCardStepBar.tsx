@@ -1,4 +1,4 @@
-const STEPS = ['queued', 'fetching_transcript', 'extracting', 'saving']
+const STEPS = ['queued', 'fetching_transcript', 'transcript_ready', 'extracting', 'saving']
 
 interface HistoryCardStepBarProps {
   currentStep: string

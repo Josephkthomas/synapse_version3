@@ -765,15 +765,18 @@ export async function callScanNowAPI(
 export async function callProcessNowAPI(
   authToken: string
 ): Promise<{ processed: number }> {
-  const res = await fetch('/api/youtube/process', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'Processing failed' })) as { error?: string }
-    throw new Error(err.error ?? `Processing failed: ${res.status}`)
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }
+
+  // Step 1: Fetch transcripts for pending items
+  await fetch('/api/youtube/fetch-transcripts', { method: 'POST', headers })
+
+  // Step 2: Extract knowledge for items with transcripts ready
+  const extractRes = await fetch('/api/youtube/extract-knowledge', { method: 'POST', headers })
+  if (!extractRes.ok) {
+    const err = await extractRes.json().catch(() => ({ error: 'Processing failed' })) as { error?: string }
+    throw new Error(err.error ?? `Processing failed: ${extractRes.status}`)
   }
-  return res.json() as Promise<{ processed: number }>
+  return extractRes.json() as Promise<{ processed: number }>
 }
 
 // ─── Update Source Name ─────────────────────────────────────────────────────

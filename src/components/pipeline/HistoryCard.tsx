@@ -132,7 +132,7 @@ export function HistoryCard({ item, isSelected, onClick, onRate, onProcessNow, i
         {isActive && (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
             {item.step && <HistoryCardStepBar currentStep={item.step} />}
-            {item.status === 'pending' && onProcessNow && (
+            {(item.status === 'pending' || item.step === 'transcript_ready') && onProcessNow && (
               <button
                 type="button"
                 onClick={e => { e.stopPropagation(); onProcessNow() }}

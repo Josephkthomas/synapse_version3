@@ -1180,7 +1180,7 @@ export async function queueVideosForProcessing(
 }
 
 export async function getQueueStats(userId: string): Promise<QueueStats> {
-  const statuses = ['pending', 'fetching_transcript', 'extracting', 'completed', 'failed'] as const
+  const statuses = ['pending', 'fetching_transcript', 'transcript_ready', 'extracting', 'completed', 'failed'] as const
 
   const counts = await Promise.all(
     statuses.map(async status => {
@@ -1200,7 +1200,7 @@ export async function getQueueStats(userId: string): Promise<QueueStats> {
 
   return {
     pending: results['pending'] ?? 0,
-    processing: (results['fetching_transcript'] ?? 0) + (results['extracting'] ?? 0),
+    processing: (results['fetching_transcript'] ?? 0) + (results['transcript_ready'] ?? 0) + (results['extracting'] ?? 0),
     completed: results['completed'] ?? 0,
     failed: results['failed'] ?? 0,
   }
@@ -1336,10 +1336,22 @@ export async function getQueueItems(
 // ─── Automate: Queue Actions ─────────────────────────────────────────────────
 
 export async function retryQueueItem(itemId: string): Promise<void> {
+  // Check if item already has a transcript — skip re-fetching if so
+  const { data: item } = await supabase
+    .from('youtube_ingestion_queue')
+    .select('transcript')
+    .eq('id', itemId)
+    .eq('status', 'failed')
+    .maybeSingle()
+
+  if (!item) throw new Error('Item not found or not in failed state')
+
+  const newStatus = item.transcript ? 'transcript_ready' : 'pending'
+
   const { error } = await supabase
     .from('youtube_ingestion_queue')
     .update({
-      status: 'pending',
+      status: newStatus,
       error_message: null,
       started_at: null,
       completed_at: null,
@@ -1704,7 +1716,7 @@ export async function fetchActiveQueueItems(userId: string): Promise<PipelineSes
       .from('youtube_ingestion_queue')
       .select('id, video_title, status, created_at, started_at, channel_id')
       .eq('user_id', userId)
-      .in('status', ['pending', 'fetching_transcript', 'extracting'])
+      .in('status', ['pending', 'fetching_transcript', 'transcript_ready', 'extracting'])
       .order('created_at', { ascending: false })
 
     if (error) {

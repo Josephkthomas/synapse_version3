@@ -17,7 +17,7 @@ export interface QueueItem {
   thumbnail_url: string | null
   published_at: string | null
   duration_seconds: number | null
-  status: 'pending' | 'fetching_transcript' | 'extracting' | 'completed' | 'failed' | 'skipped'
+  status: 'pending' | 'fetching_transcript' | 'transcript_ready' | 'extracting' | 'completed' | 'failed' | 'skipped'
   priority: number
   transcript: string | null
   transcript_language: string | null

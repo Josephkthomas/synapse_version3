@@ -22,7 +22,7 @@ export interface YouTubeVideo {
   thumbnail_url: string | null
   published_at: string | null
   duration_seconds?: number
-  status?: 'pending' | 'fetching_transcript' | 'extracting' | 'completed' | 'failed' | 'skipped'
+  status?: 'pending' | 'fetching_transcript' | 'transcript_ready' | 'extracting' | 'completed' | 'failed' | 'skipped'
   source_id?: string | null
   nodes_created?: number
   edges_created?: number

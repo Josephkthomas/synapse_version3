@@ -168,7 +168,7 @@ export function PipelineView() {
   const dragStartPct = useRef(DEFAULT_LEFT_PCT)
 
   // Data
-  const { items, allItems, loading, error, hasMore, loadMore, refetch, counts } = usePipelineHistory(sourceFilter, statusFilter, sortBy)
+  const { items, allItems, loading, error, hasMore, loadMore, refetch, startPolling, counts } = usePipelineHistory(sourceFilter, statusFilter, sortBy)
   const metrics = usePipelineMetrics(allItems)
 
   const selectedItem = useMemo(
@@ -227,26 +227,33 @@ export function PipelineView() {
 
   const [processingNowId, setProcessingNowId] = useState<string | null>(null)
 
-  const handleProcessNow = useCallback(async (item: { id: string; sourceType: string }) => {
+  const handleProcessNow = useCallback(async (item: { id: string; sourceType: string; step?: string }) => {
     if (!session?.access_token || processingNowId) return
     setProcessingNowId(item.id)
+    // Start fast polling immediately so the UI tracks progress in real time
+    startPolling()
     try {
-      const endpoint = item.sourceType === 'Meeting'
-        ? '/api/meetings/process'
-        : '/api/youtube/process'
-      await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-      })
-      // Refetch after a short delay to let processing start
-      setTimeout(() => { refetch(); setProcessingNowId(null) }, 2000)
+      const headers = {
+        'Authorization': `Bearer ${session.access_token}`,
+        'Content-Type': 'application/json',
+      }
+      if (item.sourceType === 'Meeting') {
+        await fetch('/api/meetings/process', { method: 'POST', headers })
+      } else {
+        // YouTube: call decoupled endpoints sequentially
+        // Skip transcript fetch if transcript is already ready
+        if (item.step !== 'transcript_ready') {
+          await fetch('/api/youtube/fetch-transcripts', { method: 'POST', headers })
+        }
+        await fetch('/api/youtube/extract-knowledge', { method: 'POST', headers })
+      }
+      // API call done — do an immediate refetch, then let polling handle the rest
+      refetch()
+      setProcessingNowId(null)
     } catch {
       setProcessingNowId(null)
     }
-  }, [session?.access_token, processingNowId, refetch])
+  }, [session?.access_token, processingNowId, refetch, startPolling])
 
   const toggleDropdown = useCallback((id: 'source' | 'status' | 'sort') => {
     setOpenDropdown(prev => prev === id ? null : id)
@@ -479,7 +486,7 @@ export function PipelineView() {
                       isSelected={selectedItemId === item.id}
                       onClick={() => handleCardClick(item.id)}
                       onRate={(rating) => handleRate(item.id, rating)}
-                      onProcessNow={item.status === 'pending' ? () => handleProcessNow(item) : undefined}
+                      onProcessNow={(item.status === 'pending' || item.step === 'transcript_ready') ? () => handleProcessNow(item) : undefined}
                       index={i}
                     />
                   ))}
