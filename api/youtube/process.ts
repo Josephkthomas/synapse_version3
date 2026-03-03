@@ -601,7 +601,7 @@ async function processQueueItem(
         type SemanticCandidate = { id: string; label: string; entity_type: string; description: string | null };
         const candidateMap = new Map<string, SemanticCandidate>(); // id → node (deduped)
 
-        for (const [nodeId, embedding] of nodeEmbeddings) {
+        for (const [_nodeId, embedding] of nodeEmbeddings) {
           const { data: similar } = await supabase.rpc('match_knowledge_nodes', {
             query_embedding: embedding,
             match_threshold: 0.55,
