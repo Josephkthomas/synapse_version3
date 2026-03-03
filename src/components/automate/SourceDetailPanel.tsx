@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { X, Pause, RefreshCw, PlayCircle, Link, Check, Save, ChevronDown, ChevronUp, Zap, Pencil, Trash2, Unlink } from 'lucide-react'
+import { X, Pause, RefreshCw, PlayCircle, Link, Check, Save, ChevronDown, ChevronUp, Zap, Pencil, Trash2, Unlink, Copy } from 'lucide-react'
 import type { AutomationSource, IngestedItem, SourceSettings } from '../../services/automationSources'
 import {
   updateSourceStatus, disconnectSource, deleteSource, triggerManualScan,
@@ -137,14 +137,21 @@ interface EditPanelProps {
 
 function EditPanel({ source, onCancel, onSaved }: EditPanelProps) {
   const { anchors } = useSettings()
+  const { user } = useAuth()
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [webhookCopied, setWebhookCopied] = useState(false)
 
   const [editName, setEditName] = useState(source.name)
   const [editMode, setEditMode] = useState(source.mode)
   const [editEmphasis, setEditEmphasis] = useState(source.emphasis)
   const [editAnchorIds, setEditAnchorIds] = useState<string[]>(source.linkedAnchors)
   const [editInstructions, setEditInstructions] = useState(source.customInstructions ?? '')
+
+  const isMeetingSource = source.category === 'meeting'
+  const webhookUrl = isMeetingSource && user
+    ? `${window.location.origin}/api/meetings/webhook?uid=${user.id}`
+    : ''
 
   const handleSave = async () => {
     setSaving(true)
@@ -217,6 +224,58 @@ function EditPanel({ source, onCancel, onSaved }: EditPanelProps) {
         onFocus={e => { e.currentTarget.style.borderColor = 'rgba(214,58,0,0.3)'; e.currentTarget.style.boxShadow = '0 0 0 3px var(--color-accent-50)' }}
         onBlur={e => { e.currentTarget.style.borderColor = 'var(--border-subtle)'; e.currentTarget.style.boxShadow = 'none' }}
       />
+
+      {/* Webhook URL (meeting sources only) */}
+      {isMeetingSource && webhookUrl && (
+        <>
+          <SL style={{ marginBottom: 6 }}>Webhook URL</SL>
+          <p className="font-body" style={{ fontSize: 11, color: 'var(--color-text-secondary)', margin: '0 0 8px', lineHeight: 1.4 }}>
+            Paste this into your Circleback Automation webhook action.
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14 }}>
+            <div
+              className="font-body"
+              style={{
+                flex: 1,
+                padding: '7px 10px',
+                borderRadius: 8,
+                background: 'var(--color-bg-inset)',
+                border: '1px solid var(--border-subtle)',
+                fontSize: 10,
+                color: 'var(--color-text-secondary)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                fontFamily: 'monospace',
+              }}
+            >
+              {webhookUrl}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard.writeText(webhookUrl).then(() => {
+                  setWebhookCopied(true)
+                  setTimeout(() => setWebhookCopied(false), 2000)
+                })
+              }}
+              className="font-body font-semibold"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                padding: '7px 10px', borderRadius: 8,
+                border: '1px solid var(--border-subtle)',
+                background: 'var(--color-bg-card)',
+                fontSize: 10, cursor: 'pointer',
+                color: webhookCopied ? '#22c55e' : 'var(--color-text-body)',
+                flexShrink: 0, transition: 'color 0.15s',
+              }}
+            >
+              {webhookCopied ? <Check size={11} /> : <Copy size={11} />}
+              {webhookCopied ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+        </>
+      )}
 
       {/* Extraction Mode */}
       <SL style={{ marginBottom: 6 }}>Extraction Mode</SL>
@@ -363,6 +422,7 @@ export function SourceDetailPanel({ source, onClose, onRefetch }: SourceDetailPa
   const [ingestedLoading, setIngestedLoading] = useState(true)
   const [showAllIngested, setShowAllIngested] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
+  const [urlCopied, setUrlCopied] = useState(false)
 
   const catColor = getCategoryColor(source.category)
   const itemsIngested = source.videosIngested ?? source.meetingsIngested ?? 0
@@ -531,6 +591,23 @@ export function SourceDetailPanel({ source, onClose, onRefetch }: SourceDetailPa
                 >
                   <Pencil size={12} /> Edit
                 </button>
+                {isMeeting && session?.user?.id && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const url = `${window.location.origin}/api/meetings/webhook?uid=${session.user.id}`
+                      void navigator.clipboard.writeText(url).then(() => {
+                        setUrlCopied(true)
+                        setTimeout(() => setUrlCopied(false), 2000)
+                      })
+                    }}
+                    className="font-body font-semibold"
+                    style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border-subtle)', background: 'var(--color-bg-card)', color: urlCopied ? '#22c55e' : 'var(--color-text-body)', fontSize: 11, cursor: 'pointer', transition: 'color 0.15s' }}
+                  >
+                    {urlCopied ? <Check size={12} /> : <Copy size={12} />}
+                    {urlCopied ? 'Copied!' : 'Copy URL'}
+                  </button>
+                )}
                 {!isMeeting && (
                   <button
                     type="button" onClick={() => void handleScanNow()} disabled={scanLoading}
