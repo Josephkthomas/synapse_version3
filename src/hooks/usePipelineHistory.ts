@@ -140,12 +140,15 @@ export function usePipelineHistory(
   }, [fetchData])
 
   // Merge sessions + queue items into unified list
+  // Sort queue items: meetings first (higher priority), then YouTube
   const allItems = useMemo(() => {
-    const mapped = [
-      ...queueItems.map(mapSessionToItem),
-      ...sessions.map(mapSessionToItem),
-    ]
-    return mapped
+    const mappedQueue = queueItems.map(mapSessionToItem)
+    mappedQueue.sort((a, b) => {
+      if (a.sourceType === 'Meeting' && b.sourceType !== 'Meeting') return -1
+      if (a.sourceType !== 'Meeting' && b.sourceType === 'Meeting') return 1
+      return 0
+    })
+    return [...mappedQueue, ...sessions.map(mapSessionToItem)]
   }, [sessions, queueItems])
 
   // Compute counts

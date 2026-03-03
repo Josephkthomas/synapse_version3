@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Play } from 'lucide-react'
 import { EntityBadge } from '../shared/EntityBadge'
 import { StarRating } from '../shared/StarRating'
 import { HistoryCardStepBar } from './HistoryCardStepBar'
@@ -10,6 +11,7 @@ interface HistoryCardProps {
   isSelected: boolean
   onClick: () => void
   onRate?: (rating: number) => void
+  onProcessNow?: () => void
   index: number
 }
 
@@ -29,7 +31,7 @@ function formatRelativeTime(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-export function HistoryCard({ item, isSelected, onClick, onRate, index }: HistoryCardProps) {
+export function HistoryCard({ item, isSelected, onClick, onRate, onProcessNow, index }: HistoryCardProps) {
   const [hovered, setHovered] = useState(false)
   const sourceConfig = getSourceConfig(item.sourceType)
 
@@ -127,8 +129,34 @@ export function HistoryCard({ item, isSelected, onClick, onRate, index }: Histor
 
       {/* Status-specific content */}
       <div style={{ marginTop: 12 }}>
-        {isActive && item.step && (
-          <HistoryCardStepBar currentStep={item.step} />
+        {isActive && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            {item.step && <HistoryCardStepBar currentStep={item.step} />}
+            {item.status === 'pending' && onProcessNow && (
+              <button
+                type="button"
+                onClick={e => { e.stopPropagation(); onProcessNow() }}
+                className="font-body font-semibold cursor-pointer"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '4px 10px',
+                  borderRadius: 20,
+                  fontSize: 11,
+                  background: 'var(--color-accent-50)',
+                  border: '1px solid rgba(214,58,0,0.15)',
+                  color: 'var(--color-accent-500)',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <Play size={10} style={{ fill: 'currentColor' }} />
+                Process Now
+              </button>
+            )}
+          </div>
         )}
 
         {isCompleted && (

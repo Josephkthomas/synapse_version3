@@ -1,10 +1,12 @@
-import { X, Clock, Loader2, Check, CircleDashed } from 'lucide-react'
+import { X, Clock, Loader2, Check, CircleDashed, Play } from 'lucide-react'
 import { getSourceConfig } from '../../config/sourceTypes'
 import type { PipelineHistoryItem } from '../../types/pipeline'
 
 interface ActiveItemDetailProps {
   item: PipelineHistoryItem
   onClose: () => void
+  onProcessNow?: () => void
+  processingNow?: boolean
 }
 
 function formatRelativeTime(dateStr: string): string {
@@ -54,7 +56,7 @@ function getStageStatus(stageId: string, currentStep: string | undefined): 'done
   return 'pending'
 }
 
-export function ActiveItemDetail({ item, onClose }: ActiveItemDetailProps) {
+export function ActiveItemDetail({ item, onClose, onProcessNow, processingNow }: ActiveItemDetailProps) {
   const sourceConfig = getSourceConfig(item.sourceType)
   const isQueued = item.status === 'pending'
   const elapsedMs = Date.now() - new Date(item.createdAt).getTime()
@@ -162,6 +164,39 @@ export function ActiveItemDetail({ item, onClose }: ActiveItemDetailProps) {
           {isQueued ? 'Queued' : 'In Progress'}
         </span>
       </div>
+
+      {/* Process Now button (for queued items) */}
+      {isQueued && onProcessNow && (
+        <button
+          type="button"
+          onClick={onProcessNow}
+          disabled={processingNow}
+          className="font-body font-semibold cursor-pointer"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            width: '100%',
+            padding: '10px 16px',
+            borderRadius: 10,
+            fontSize: 12,
+            background: processingNow ? 'var(--color-bg-inset)' : 'var(--color-accent-500)',
+            border: 'none',
+            color: processingNow ? 'var(--color-text-secondary)' : 'white',
+            marginBottom: 20,
+            transition: 'all 0.15s ease',
+            opacity: processingNow ? 0.7 : 1,
+          }}
+        >
+          {processingNow ? (
+            <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
+          ) : (
+            <Play size={13} style={{ fill: 'currentColor' }} />
+          )}
+          {processingNow ? 'Processing...' : 'Process Now'}
+        </button>
+      )}
 
       {/* Progress bar */}
       <div style={{ marginBottom: 24 }}>

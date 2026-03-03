@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { Activity, GripVertical, ChevronDown } from 'lucide-react'
+import { useAuth } from '../hooks/useAuth'
 import { usePipelineHistory } from '../hooks/usePipelineHistory'
 import { usePipelineMetrics } from '../hooks/usePipelineMetrics'
 import { updateExtractionRating, deleteExtractionSession } from '../services/supabase'
@@ -150,6 +151,8 @@ function FilterDropdown<T extends string>({
 // ─── Main View ─────────────────────────────────────────────────────────────────
 
 export function PipelineView() {
+  const { session } = useAuth()
+
   // Filters + selection
   const [sourceFilter, setSourceFilter] = useState<SourceTypeFilter>('all')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -222,6 +225,29 @@ export function PipelineView() {
     }
   }, [allItems, refetch])
 
+  const [processingNowId, setProcessingNowId] = useState<string | null>(null)
+
+  const handleProcessNow = useCallback(async (item: { id: string; sourceType: string }) => {
+    if (!session?.access_token || processingNowId) return
+    setProcessingNowId(item.id)
+    try {
+      const endpoint = item.sourceType === 'Meeting'
+        ? '/api/meetings/process'
+        : '/api/youtube/process'
+      await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+      })
+      // Refetch after a short delay to let processing start
+      setTimeout(() => { refetch(); setProcessingNowId(null) }, 2000)
+    } catch {
+      setProcessingNowId(null)
+    }
+  }, [session?.access_token, processingNowId, refetch])
+
   const toggleDropdown = useCallback((id: 'source' | 'status' | 'sort') => {
     setOpenDropdown(prev => prev === id ? null : id)
   }, [])
@@ -293,6 +319,8 @@ export function PipelineView() {
         <ActiveItemDetail
           item={selectedItem}
           onClose={() => setSelectedItemId(null)}
+          onProcessNow={() => handleProcessNow(selectedItem)}
+          processingNow={processingNowId === selectedItem.id}
         />
       )
     }
@@ -451,6 +479,7 @@ export function PipelineView() {
                       isSelected={selectedItemId === item.id}
                       onClick={() => handleCardClick(item.id)}
                       onRate={(rating) => handleRate(item.id, rating)}
+                      onProcessNow={item.status === 'pending' ? () => handleProcessNow(item) : undefined}
                       index={i}
                     />
                   ))}
