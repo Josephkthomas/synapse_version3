@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Play, Calendar } from 'lucide-react'
+import { Play } from 'lucide-react'
 import type { AutomationSource } from '../../services/automationSources'
 import { StatusLabel } from '../shared/StatusIndicator'
 
@@ -15,7 +15,10 @@ function getCategoryColor(category: AutomationSource['category']): string {
   return '#3b82f6'
 }
 
-function CategoryIcon({ category, color }: { category: AutomationSource['category']; color: string }) {
+function CategoryIcon({ category, color, iconUrl }: { category: AutomationSource['category']; color: string; iconUrl?: string }) {
+  if (iconUrl) {
+    return <img src={iconUrl} alt="" width={15} height={15} style={{ borderRadius: 3, objectFit: 'cover' }} />
+  }
   if (category === 'youtube-channel') {
     return (
       <svg width="15" height="15" viewBox="0 0 24 24" fill={color}>
@@ -26,7 +29,8 @@ function CategoryIcon({ category, color }: { category: AutomationSource['categor
   if (category === 'youtube-playlist') {
     return <Play size={15} strokeWidth={1.5} style={{ color }} />
   }
-  return <Calendar size={15} strokeWidth={1.5} style={{ color }} />
+  // Meeting fallback: microphone emoji
+  return <span style={{ fontSize: 13, lineHeight: 1 }}>🎙</span>
 }
 
 function getModeColor(mode: string): string {
@@ -89,7 +93,7 @@ export function SourceCard({ source, isSelected, onClick, index = 0 }: SourceCar
               flexShrink: 0,
             }}
           >
-            <CategoryIcon category={source.category} color={catColor} />
+            <CategoryIcon category={source.category} color={catColor} iconUrl={source.iconUrl} />
           </div>
           <div>
             <div
@@ -158,7 +162,7 @@ export function SourceCard({ source, isSelected, onClick, index = 0 }: SourceCar
             <span style={{ fontWeight: 600, color: 'var(--color-text-body)' }}>
               {source.videosIngested}
             </span>{' '}
-            {source.category === 'youtube-playlist' ? 'videos in playlist' : 'videos ingested'}
+            videos ingested
           </span>
         )}
         {source.meetingsIngested !== undefined && (

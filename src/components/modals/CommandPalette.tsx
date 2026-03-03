@@ -286,13 +286,23 @@ export function CommandPalette({ onClose, onOpenSettings }: CommandPaletteProps)
                       </span>
                     )}
 
-                    {/* Label */}
-                    <span
-                      className="font-body font-medium text-text-primary flex-1 text-left truncate"
-                      style={{ fontSize: 13 }}
-                    >
-                      {item.label}
-                    </span>
+                    {/* Label + subtitle */}
+                    <div className="flex-1 min-w-0 text-left">
+                      <span
+                        className="font-body font-medium text-text-primary block truncate"
+                        style={{ fontSize: 13 }}
+                      >
+                        {item.label}
+                      </span>
+                      {isNode && item.nodeData?.description && (
+                        <span
+                          className="font-body block truncate"
+                          style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 1 }}
+                        >
+                          {item.nodeData.description}
+                        </span>
+                      )}
+                    </div>
 
                     {/* Entity type badge (nodes only) */}
                     {isNode && (

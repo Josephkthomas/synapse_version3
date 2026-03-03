@@ -48,6 +48,7 @@ export function SourceDetail({ source, onClose }: SourceDetailProps) {
   const [isEditingSummary, setIsEditingSummary] = useState(false)
   const [draftSummary, setDraftSummary] = useState('')
   const [generationStatus, setGenerationStatus] = useState<'idle' | 'generating' | 'error'>('idle')
+  const [regenStatus, setRegenStatus] = useState<'idle' | 'confirming' | 'regenerating' | 'error'>('idle')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const cfg = getSourceConfig(source.source_type)
@@ -58,6 +59,7 @@ export function SourceDetail({ source, onClose }: SourceDetailProps) {
     setCurrentSummarySource(source.summary_source ?? null)
     setIsEditingSummary(false)
     setGenerationStatus('idle')
+    setRegenStatus('idle')
   }, [source.id, source.summary, source.summary_source])
 
   useEffect(() => {
@@ -138,6 +140,38 @@ export function SourceDetail({ source, onClose }: SourceDetailProps) {
     }
   }
 
+  const handleRegenerateClick = () => {
+    if (currentSummarySource === 'user') {
+      setRegenStatus('confirming')
+    } else {
+      void handleRegenerateSummary()
+    }
+  }
+
+  const handleRegenerateSummary = async () => {
+    setRegenStatus('regenerating')
+    try {
+      const result = await resolveSummary(
+        source.source_type ?? null,
+        source.content ?? null,
+        source.metadata ?? null,
+      )
+      if (result) {
+        const { error } = await supabase
+          .from('knowledge_sources')
+          .update({ summary: result.summary, summary_source: result.source })
+          .eq('id', source.id)
+        if (!error) {
+          setCurrentSummary(result.summary)
+          setCurrentSummarySource(result.source)
+        }
+      }
+      setRegenStatus('idle')
+    } catch {
+      setRegenStatus('error')
+    }
+  }
+
   const contentPreview = source.content
     ? source.content.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180) + '...'
     : null
@@ -213,23 +247,57 @@ export function SourceDetail({ source, onClose }: SourceDetailProps) {
             )}
           </div>
           {currentSummary && !isEditingSummary && (
-            <button
-              type="button"
-              onClick={handleEditStart}
-              className="font-body cursor-pointer"
-              style={{
-                fontSize: 11,
-                color: 'var(--color-accent-500)',
-                background: 'none',
-                border: 'none',
-                padding: 0,
-                textDecoration: 'none',
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.textDecoration = 'underline' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.textDecoration = 'none' }}
-            >
-              Edit
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleEditStart}
+                disabled={regenStatus === 'regenerating'}
+                className="font-body cursor-pointer"
+                style={{
+                  fontSize: 11,
+                  color: 'var(--color-accent-500)',
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  textDecoration: 'none',
+                  opacity: regenStatus === 'regenerating' ? 0.4 : 1,
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.textDecoration = 'underline' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.textDecoration = 'none' }}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={handleRegenerateClick}
+                disabled={regenStatus === 'regenerating'}
+                className="font-body cursor-pointer inline-flex items-center gap-1"
+                style={{
+                  fontSize: 11,
+                  color: regenStatus === 'regenerating' ? 'var(--color-text-secondary)' : 'var(--color-text-secondary)',
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  textDecoration: 'none',
+                  opacity: regenStatus === 'regenerating' ? 0.6 : 1,
+                }}
+                onMouseEnter={e => {
+                  if (regenStatus !== 'regenerating') (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-accent-500)'
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLButtonElement).style.color = 'var(--color-text-secondary)'
+                }}
+              >
+                {regenStatus === 'regenerating' ? (
+                  <>
+                    <Loader2 size={10} style={{ animation: 'spin 1s linear infinite' }} />
+                    Regenerating...
+                  </>
+                ) : (
+                  'Regenerate'
+                )}
+              </button>
+            </div>
           )}
         </div>
 
@@ -290,12 +358,71 @@ export function SourceDetail({ source, onClose }: SourceDetailProps) {
             </div>
           </div>
         ) : currentSummary ? (
-          <p
-            className="font-body leading-relaxed"
-            style={{ fontSize: 13, color: 'var(--color-text-body)' }}
-          >
-            {currentSummary}
-          </p>
+          <div>
+            <p
+              className="font-body leading-relaxed"
+              style={{
+                fontSize: 13,
+                color: 'var(--color-text-body)',
+                opacity: regenStatus === 'regenerating' ? 0.5 : 1,
+                transition: 'opacity 0.15s ease',
+              }}
+            >
+              {currentSummary}
+            </p>
+            {regenStatus === 'confirming' && (
+              <div
+                className="flex items-center justify-between mt-2"
+                style={{
+                  padding: '8px 10px',
+                  borderRadius: 6,
+                  background: 'var(--color-semantic-amber-50, #fffbeb)',
+                  border: '1px solid var(--color-semantic-amber-200, #fde68a)',
+                }}
+              >
+                <span className="font-body" style={{ fontSize: 12, color: 'var(--color-text-body)' }}>
+                  This summary was manually edited.
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRegenStatus('idle')}
+                    className="font-body font-semibold cursor-pointer"
+                    style={{
+                      fontSize: 11,
+                      padding: '4px 10px',
+                      borderRadius: 5,
+                      background: 'var(--color-bg-inset)',
+                      border: '1px solid var(--border-default)',
+                      color: 'var(--color-text-body)',
+                    }}
+                  >
+                    Keep mine
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleRegenerateSummary()}
+                    className="font-body cursor-pointer"
+                    style={{
+                      fontSize: 11,
+                      padding: '4px 10px',
+                      borderRadius: 5,
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--color-semantic-red-500, #ef4444)',
+                    }}
+                  >
+                    Regenerate anyway
+                  </button>
+                </div>
+              </div>
+            )}
+            {regenStatus === 'error' && (
+              <p className="font-body mt-1" style={{ fontSize: 11, color: 'var(--color-semantic-red-500, #ef4444)' }}>
+                Regeneration failed
+              </p>
+            )}
+          </div>
         ) : contentPreview ? (
           <div>
             <p

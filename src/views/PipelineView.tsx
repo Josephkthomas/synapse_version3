@@ -2,18 +2,13 @@ import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { Activity, GripVertical, ChevronDown } from 'lucide-react'
 import { usePipelineHistory } from '../hooks/usePipelineHistory'
 import { usePipelineMetrics } from '../hooks/usePipelineMetrics'
-import { useHeatmapData } from '../hooks/useHeatmapData'
 import { updateExtractionRating, deleteExtractionSession } from '../services/supabase'
-import { HealthMetrics } from '../components/pipeline/HealthMetrics'
-import { ExtractionHeatmap } from '../components/pipeline/ExtractionHeatmap'
-import { DistributionChart } from '../components/pipeline/DistributionChart'
-import { ConfidenceHistogram } from '../components/pipeline/ConfidenceHistogram'
-import { ProcessingSparkline } from '../components/pipeline/ProcessingSparkline'
 import { HistoryCard } from '../components/pipeline/HistoryCard'
 import { ExtractionDetail } from '../components/pipeline/ExtractionDetail'
+import { ActiveItemDetail } from '../components/pipeline/ActiveItemDetail'
 import { ExtractionSettings } from '../components/pipeline/ExtractionSettings'
-import { HeatmapDayDetail } from '../components/pipeline/HeatmapDayDetail'
-import type { SourceTypeFilter, StatusFilter, SortOption, HeatmapCell } from '../types/pipeline'
+import { PipelineStats } from '../components/pipeline/PipelineStats'
+import type { SourceTypeFilter, StatusFilter, SortOption } from '../types/pipeline'
 
 const DEFAULT_LEFT_PCT = 65
 const MIN_LEFT_PCT = 30
@@ -160,9 +155,7 @@ export function PipelineView() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [sortBy, setSortBy] = useState<SortOption>('recent')
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null)
-  const [selectedDay, setSelectedDay] = useState<{ week: number; day: number } | null>(null)
   const [openDropdown, setOpenDropdown] = useState<'source' | 'status' | 'sort' | null>(null)
-  const [distMode, setDistMode] = useState<'entities' | 'sources'>('entities')
 
   // Drag resize
   const containerRef = useRef<HTMLDivElement>(null)
@@ -174,74 +167,11 @@ export function PipelineView() {
   // Data
   const { items, allItems, loading, error, hasMore, loadMore, refetch, counts } = usePipelineHistory(sourceFilter, statusFilter, sortBy)
   const metrics = usePipelineMetrics(allItems)
-  const { cells, loading: heatmapLoading, maxCount: _maxCount } = useHeatmapData()
 
   const selectedItem = useMemo(
     () => selectedItemId ? items.find(i => i.id === selectedItemId) ?? null : null,
     [selectedItemId, items]
   )
-
-  const selectedDayCell = useMemo<HeatmapCell | null>(() => {
-    if (!selectedDay) return null
-    return cells.find(c => c.week === selectedDay.week && c.day === selectedDay.day) ?? null
-  }, [selectedDay, cells])
-
-  // ── Aggregate data for charts ──────────────────────────────────────────────
-
-  const entityAggregation = useMemo(() => {
-    const agg: Record<string, number> = {}
-    for (const item of allItems) {
-      if (item.status !== 'completed') continue
-      for (const [type, count] of Object.entries(item.entityBreakdown)) {
-        agg[type] = (agg[type] ?? 0) + count
-      }
-    }
-    return agg
-  }, [allItems])
-
-  const sourceAggregation = useMemo(() => {
-    const agg: Record<string, number> = {}
-    for (const item of allItems) {
-      if (item.status === 'pending' || item.status === 'processing') continue
-      const t = item.sourceType
-      agg[t] = (agg[t] ?? 0) + 1
-    }
-    return agg
-  }, [allItems])
-
-  // Confidence buckets
-  const confidenceBuckets = useMemo(() => {
-    // Placeholder: would need per-node confidence data
-    // For now, return empty buckets
-    return [0, 0, 0, 0, 0]
-  }, [])
-
-  // Processing sparkline (14 days)
-  const dailyDurations = useMemo(() => {
-    const now = new Date()
-    now.setHours(0, 0, 0, 0)
-    const durations: number[] = []
-
-    for (let d = 13; d >= 0; d--) {
-      const dayStart = new Date(now)
-      dayStart.setDate(now.getDate() - d)
-      const dayKey = dayStart.toISOString().split('T')[0]
-
-      const dayItems = allItems.filter(i => {
-        const itemDate = new Date(i.createdAt).toISOString().split('T')[0]
-        return itemDate === dayKey && i.status === 'completed' && i.duration > 0
-      })
-
-      if (dayItems.length > 0) {
-        const avg = dayItems.reduce((sum, i) => sum + i.duration, 0) / dayItems.length / 1000
-        durations.push(avg)
-      } else {
-        durations.push(0)
-      }
-    }
-
-    return durations
-  }, [allItems])
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -292,14 +222,6 @@ export function PipelineView() {
     }
   }, [allItems, refetch])
 
-  const handleSelectDay = useCallback((week: number, day: number) => {
-    setSelectedDay({ week, day })
-  }, [])
-
-  const handleClearDay = useCallback(() => {
-    setSelectedDay(null)
-  }, [])
-
   const toggleDropdown = useCallback((id: 'source' | 'status' | 'sort') => {
     setOpenDropdown(prev => prev === id ? null : id)
   }, [])
@@ -310,12 +232,11 @@ export function PipelineView() {
       if (e.key === 'Escape') {
         if (openDropdown) setOpenDropdown(null)
         else if (selectedItemId) setSelectedItemId(null)
-        else if (selectedDay) setSelectedDay(null)
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [openDropdown, selectedItemId, selectedDay])
+  }, [openDropdown, selectedItemId])
 
   // ── Summary line ───────────────────────────────────────────────────────────
 
@@ -337,7 +258,8 @@ export function PipelineView() {
 
   const statusOptions: DropdownOption<StatusFilter>[] = [
     { value: 'all', label: 'All Statuses' },
-    { value: 'active', label: 'In Progress', count: counts.active },
+    { value: 'queued', label: 'Queued', count: counts.queued },
+    { value: 'in_progress', label: 'In Progress', count: counts.inProgress },
     { value: 'completed', label: 'Completed', count: counts.completed },
     { value: 'failed', label: 'Failed', count: counts.failed },
   ]
@@ -352,6 +274,7 @@ export function PipelineView() {
   // ── Right panel content ────────────────────────────────────────────────────
 
   const isCompletedOrFailed = selectedItem && (selectedItem.status === 'completed' || selectedItem.status === 'failed')
+  const isActive = selectedItem && (selectedItem.status === 'pending' || selectedItem.status === 'processing' || selectedItem.status === 'extracting')
 
   const rightContent = (() => {
     if (isCompletedOrFailed && selectedItem) {
@@ -365,13 +288,18 @@ export function PipelineView() {
       )
     }
 
+    if (isActive && selectedItem) {
+      return (
+        <ActiveItemDetail
+          item={selectedItem}
+          onClose={() => setSelectedItemId(null)}
+        />
+      )
+    }
+
     return (
       <div style={{ overflowY: 'auto', height: '100%' }}>
-        {selectedDayCell && (
-          <div style={{ padding: '24px 20px 0' }}>
-            <HeatmapDayDetail cell={selectedDayCell} onClose={handleClearDay} />
-          </div>
-        )}
+        <PipelineStats metrics={metrics} allItems={allItems} loading={loading} />
         <ExtractionSettings />
       </div>
     )
@@ -453,7 +381,7 @@ export function PipelineView() {
           cursor: isDragging ? 'col-resize' : undefined,
         }}
       >
-        {/* ── Left: scrollable center stage ── */}
+        {/* ── Left: scrollable center stage — queue/history cards ── */}
         <div
           style={{
             width: `${leftWidthPct}%`,
@@ -465,50 +393,7 @@ export function PipelineView() {
           }}
         >
           <div style={{ padding: '20px 36px' }}>
-
-            {/* ── Health Metrics ── */}
-            <HealthMetrics metrics={metrics} loading={loading} />
-
-            {/* ── Analytics Dashboard ── */}
-            <ExtractionHeatmap
-              cells={cells}
-              loading={heatmapLoading}
-              selectedDay={selectedDay}
-              onSelectDay={handleSelectDay}
-              onClearDay={handleClearDay}
-            />
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
-              <DistributionChart
-                entityData={selectedDayCell?.entityBreakdown ?? entityAggregation}
-                sourceData={selectedDayCell?.sourceBreakdown ?? sourceAggregation}
-                mode={distMode}
-                onModeChange={setDistMode}
-                dayView={!!selectedDayCell}
-              />
-              <div
-                style={{
-                  background: 'var(--color-bg-card)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 10,
-                  padding: '16px 18px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                }}
-              >
-                <ConfidenceHistogram
-                  buckets={selectedDayCell?.confidenceBuckets ?? confidenceBuckets}
-                  dayView={!!selectedDayCell}
-                />
-                <div style={{ borderBottom: '1px solid var(--border-subtle)', margin: '14px 0' }} />
-                <ProcessingSparkline
-                  dailyDurations={dailyDurations}
-                  selectedDayDuration={selectedDayCell ? selectedDayCell.avgDuration : undefined}
-                />
-              </div>
-            </div>
-
-            {/* ── History Cards ── */}
+            {/* ── History / Queue Cards ── */}
             {loading && items.length === 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {[0, 1, 2].map(i => (

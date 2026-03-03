@@ -177,6 +177,7 @@ async function enrichChunks(chunks: SemanticChunkResult[]): Promise<EnrichedChun
       })(),
       sourceType: source?.source_type ?? 'Document',
       sourceCreatedAt: source?.created_at ?? new Date().toISOString(),
+      sourceSummary: source?.summary ?? null,
     }
   })
 }

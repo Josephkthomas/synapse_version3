@@ -63,7 +63,8 @@ interface FilterCounts {
   Meeting: number
   Document: number
   Note: number
-  active: number
+  queued: number
+  inProgress: number
   completed: number
   failed: number
 }
@@ -145,13 +146,14 @@ export function usePipelineHistory(
 
   // Compute counts
   const counts = useMemo<FilterCounts>(() => {
-    const c: FilterCounts = { all: allItems.length, YouTube: 0, Meeting: 0, Document: 0, Note: 0, active: 0, completed: 0, failed: 0 }
+    const c: FilterCounts = { all: allItems.length, YouTube: 0, Meeting: 0, Document: 0, Note: 0, queued: 0, inProgress: 0, completed: 0, failed: 0 }
     for (const item of allItems) {
       if (item.sourceType === 'YouTube') c.YouTube += 1
       else if (item.sourceType === 'Meeting') c.Meeting += 1
       else if (item.sourceType === 'Document') c.Document += 1
       else if (item.sourceType === 'Note') c.Note += 1
-      if (item.status === 'pending' || item.status === 'processing' || item.status === 'extracting') c.active += 1
+      if (item.status === 'pending') c.queued += 1
+      else if (item.status === 'processing' || item.status === 'extracting') c.inProgress += 1
       else if (item.status === 'completed') c.completed += 1
       else if (item.status === 'failed') c.failed += 1
     }
@@ -166,8 +168,10 @@ export function usePipelineHistory(
       result = result.filter(i => i.sourceType === sourceFilter)
     }
 
-    if (statusFilter === 'active') {
-      result = result.filter(i => i.status === 'pending' || i.status === 'processing' || i.status === 'extracting')
+    if (statusFilter === 'queued') {
+      result = result.filter(i => i.status === 'pending')
+    } else if (statusFilter === 'in_progress') {
+      result = result.filter(i => i.status === 'processing' || i.status === 'extracting')
     } else if (statusFilter === 'completed') {
       result = result.filter(i => i.status === 'completed')
     } else if (statusFilter === 'failed') {

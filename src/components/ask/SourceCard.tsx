@@ -21,9 +21,11 @@ interface SourceCardProps {
   chunk: EnrichedChunk
   citationIndex?: number
   isHighlighted?: boolean
+  /** When true, show "Same source" label instead of full summary (dedup) */
+  isSameSourceAsPrevious?: boolean
 }
 
-export function SourceCard({ chunk, citationIndex, isHighlighted }: SourceCardProps) {
+export function SourceCard({ chunk, citationIndex, isHighlighted, isSameSourceAsPrevious }: SourceCardProps) {
   const timeAgo = timeAgoShort(chunk.sourceCreatedAt)
 
   return (
@@ -48,7 +50,7 @@ export function SourceCard({ chunk, citationIndex, isHighlighted }: SourceCardPr
       }}
     >
       {/* Top row */}
-      <div className="flex items-start" style={{ gap: 6, marginBottom: 6 }}>
+      <div className="flex items-start" style={{ gap: 6, marginBottom: isSameSourceAsPrevious ? 6 : (chunk.sourceSummary ? 4 : 6) }}>
         {citationIndex !== undefined && (
           <span
             className="font-body font-bold shrink-0"
@@ -83,6 +85,39 @@ export function SourceCard({ chunk, citationIndex, isHighlighted }: SourceCardPr
           {timeAgo}
         </span>
       </div>
+
+      {/* Source summary — show on first card from this source, "Same source" on subsequent */}
+      {isSameSourceAsPrevious ? (
+        <p
+          className="font-body"
+          style={{
+            fontSize: 10,
+            color: 'var(--color-text-secondary)',
+            marginBottom: 6,
+          }}
+        >
+          Same source
+        </p>
+      ) : chunk.sourceSummary ? (
+        <p
+          className="font-body"
+          style={{
+            fontSize: 12,
+            fontWeight: 400,
+            fontStyle: 'italic',
+            color: 'var(--color-text-body)',
+            opacity: 0.8,
+            lineHeight: 1.45,
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+            marginBottom: 8,
+          }}
+        >
+          {chunk.sourceSummary}
+        </p>
+      ) : null}
 
       {/* Snippet */}
       <p

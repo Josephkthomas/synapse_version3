@@ -7,7 +7,7 @@ import { SourceIcon } from '../shared/SourceIcon'
 import { RelationshipTag } from '../shared/RelationshipTag'
 import { useNodeNeighbors } from '../../hooks/useNodeNeighbors'
 import { useSettings } from '../../hooks/useSettings'
-import { updateNode, fetchNodeById } from '../../services/supabase'
+import { supabase, updateNode, fetchNodeById } from '../../services/supabase'
 import { useGraphContext } from '../../hooks/useGraphContext'
 import type { KnowledgeNode } from '../../types/database'
 
@@ -71,6 +71,8 @@ export function NodeDetail({ node: initialNode, onClose, onNavigateToNode }: Nod
   const [isAnchorLoading, setIsAnchorLoading] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  const [sourceSummary, setSourceSummary] = useState<string | null>(null)
+
   const { neighbors, isLoading: neighborsLoading, error: neighborsError } = useNodeNeighbors(node.id)
   const { promoteToAnchor, demoteAnchor, refreshAnchors } = useSettings()
   const { setRightPanelContent, setSelectedNodeId } = useGraphContext()
@@ -84,7 +86,22 @@ export function NodeDetail({ node: initialNode, onClose, onNavigateToNode }: Nod
     setIsEditing(false)
     setSaveError(null)
     setSaveSuccess(false)
+    setSourceSummary(null)
   }, [initialNode.id, initialNode])
+
+  // Fetch source summary for provenance
+  useEffect(() => {
+    if (!initialNode.source_id) return
+    setSourceSummary(null)
+    supabase
+      .from('knowledge_sources')
+      .select('summary')
+      .eq('id', initialNode.source_id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data?.summary) setSourceSummary(data.summary as string)
+      })
+  }, [initialNode.source_id])
 
   // Auto-resize textarea
   useEffect(() => {
@@ -329,6 +346,20 @@ export function NodeDetail({ node: initialNode, onClose, onNavigateToNode }: Nod
                 <div className="font-body text-[11px] text-text-secondary mt-0.5">
                   {formatTime(node.created_at)}
                 </div>
+                {sourceSummary && (
+                  <p
+                    className="font-body text-[12px] text-text-secondary mt-1"
+                    style={{
+                      lineHeight: 1.45,
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {sourceSummary}
+                  </p>
+                )}
               </div>
             </div>
           ) : (

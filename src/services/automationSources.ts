@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { fetchPlaylistMetadata } from './youtube'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,7 @@ export interface AutomationSource {
   emphasis: string
   linkedAnchors: string[]
   customInstructions?: string
+  iconUrl?: string
   queue: {
     pending: number
     processing: number
@@ -117,7 +119,7 @@ export async function fetchAutomationSources(): Promise<AutomationSource[]> {
       .eq('user_id', user.id),
     supabase
       .from('knowledge_sources')
-      .select('id, title, created_at')
+      .select('id, title, created_at, metadata')
       .eq('source_type', 'Meeting')
       .limit(100),
   ])
@@ -150,6 +152,7 @@ export async function fetchAutomationSources(): Promise<AutomationSource[]> {
   // YouTube playlists
   for (const pl of (playlistsRes.data ?? []) as Record<string, unknown>[]) {
     const plStatus = (pl.status as string) === 'active' || (pl.is_active as boolean) ? 'active' : 'paused'
+    const plQueue = buildQueueCounts(queueRows, pl.id as string, 'playlist_id')
     sources.push({
       id: pl.id as string,
       category: 'youtube-playlist',
@@ -157,30 +160,52 @@ export async function fetchAutomationSources(): Promise<AutomationSource[]> {
       channel: (pl.channel_name as string) || undefined,
       description: (pl.description as string) || undefined,
       status: plStatus as AutomationSource['status'],
-      videosIngested: (pl.known_video_count as number) ?? 0,
+      videosIngested: plQueue.complete,
       lastScan: toRelativeTime(pl.updated_at as string | null),
       mode: (pl.extraction_mode as string) || 'comprehensive',
       emphasis: (pl.anchor_emphasis as string) || 'standard',
       linkedAnchors: (pl.linked_anchor_ids as string[]) || [],
       customInstructions: (pl.custom_instructions as string) || undefined,
-      queue: buildQueueCounts(queueRows, pl.id as string, 'playlist_id'),
+      queue: plQueue,
     })
   }
 
-  // Meeting integration (synthetic)
-  const meetingCount = (meetingsRes.data ?? []).length
+  // Meeting integration (synthetic) — detect provider from metadata
+  const meetingRows = (meetingsRes.data ?? []) as Record<string, unknown>[]
+  const meetingCount = meetingRows.length
   if (meetingCount > 0) {
+    // Detect provider from meeting metadata (e.g. { provider: 'circleback' })
+    const providerCounts = new Map<string, number>()
+    for (const m of meetingRows) {
+      const meta = m.metadata as Record<string, unknown> | null
+      const provider = (meta?.provider as string) || 'unknown'
+      providerCounts.set(provider, (providerCounts.get(provider) ?? 0) + 1)
+    }
+    // Use the most common provider
+    const topProvider = [...providerCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'unknown'
+
+    const PROVIDER_CONFIG: Record<string, { name: string; iconUrl?: string; description: string }> = {
+      circleback: { name: 'Circleback', iconUrl: '/logos/circleback.jpeg', description: 'Meeting transcripts via Circleback' },
+      fireflies: { name: 'Fireflies', iconUrl: '/logos/fireflies.jpeg', description: 'Meeting transcripts via Fireflies' },
+      otter: { name: 'Otter.ai', description: 'Meeting transcripts via Otter.ai' },
+      unknown: { name: 'Meeting Transcripts', description: 'Auto-captured meeting transcripts via connected services' },
+    }
+    const fallback: { name: string; iconUrl?: string; description: string } = { name: 'Meeting Transcripts', description: 'Auto-captured meeting transcripts via connected services' }
+    const providerInfo = PROVIDER_CONFIG[topProvider] ?? fallback
+
     sources.push({
       id: 'meeting-integration',
       category: 'meeting',
-      name: 'Meeting Transcripts',
-      description: 'Auto-captured meeting transcripts via connected services',
+      name: providerInfo.name,
+      handle: topProvider !== 'unknown' ? 'Meeting Integration' : undefined,
+      description: providerInfo.description,
       status: 'connected',
       meetingsIngested: meetingCount,
-      lastSync: toRelativeTime((meetingsRes.data?.[0] as Record<string, unknown> | undefined)?.created_at as string | null),
+      lastSync: toRelativeTime(meetingRows[0]?.created_at as string | null),
       mode: 'comprehensive',
       emphasis: 'standard',
       linkedAnchors: [],
+      iconUrl: providerInfo.iconUrl,
       queue: { pending: 0, processing: 0, complete: 0, failed: 0 },
     })
   }
@@ -461,6 +486,7 @@ export async function updateSourceSettings(
     extraction_mode: settings.mode,
     anchor_emphasis: settings.emphasis,
     linked_anchor_ids: settings.linkedAnchorIds,
+    custom_instructions: settings.customInstructions ?? null,
     updated_at: new Date().toISOString(),
   }
 
@@ -509,6 +535,7 @@ export async function addYouTubeChannel(
       extraction_mode: settings.mode,
       anchor_emphasis: settings.emphasis,
       linked_anchor_ids: settings.linkedAnchorIds,
+      custom_instructions: settings.customInstructions ?? null,
       is_active: true,
       total_videos_ingested: 0,
       min_video_duration: 0,
@@ -552,12 +579,16 @@ export async function addYouTubePlaylist(
   if (!playlistId) throw new Error('Invalid YouTube playlist URL. Expected format: youtube.com/playlist?list=...')
   const synapseCode = 'SYN-' + Math.random().toString(36).substring(2, 6).toUpperCase()
 
+  // Try to fetch real playlist name from YouTube API
+  const metadata = await fetchPlaylistMetadata(playlistId).catch(() => null)
+  const playlistName = metadata?.name || `Playlist ${playlistId.substring(0, 8)}`
+
   const { data, error } = await supabase
     .from('youtube_playlists')
     .insert({
       user_id: user.id,
       playlist_id: playlistId,
-      playlist_name: `Playlist ${playlistId.substring(0, 8)}`,
+      playlist_name: playlistName,
       playlist_url: playlistUrl,
       synapse_code: synapseCode,
       status: 'active',
@@ -565,7 +596,8 @@ export async function addYouTubePlaylist(
       extraction_mode: settings.mode,
       anchor_emphasis: settings.emphasis,
       linked_anchor_ids: settings.linkedAnchorIds,
-      known_video_count: 0,
+      custom_instructions: settings.customInstructions ?? null,
+      known_video_count: metadata?.videoCount ?? 0,
     })
     .select()
     .single()
@@ -636,6 +668,46 @@ export async function disconnectSource(
   }
 }
 
+// ─── Delete Source ──────────────────────────────────────────────────────────
+
+export async function deleteSource(
+  sourceId: string,
+  category: AutomationSource['category']
+): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Not authenticated')
+
+  if (category === 'youtube-channel') {
+    // Delete queue items first (may have FK constraint)
+    await supabase
+      .from('youtube_ingestion_queue')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('channel_id', sourceId)
+    // Delete the channel record
+    const { error } = await supabase
+      .from('youtube_channels')
+      .delete()
+      .eq('id', sourceId)
+      .eq('user_id', user.id)
+    if (error) throw new Error(error.message)
+  } else if (category === 'youtube-playlist') {
+    // Delete queue items first
+    await supabase
+      .from('youtube_ingestion_queue')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('playlist_id', sourceId)
+    // Delete the playlist record
+    const { error } = await supabase
+      .from('youtube_playlists')
+      .delete()
+      .eq('id', sourceId)
+      .eq('user_id', user.id)
+    if (error) throw new Error(error.message)
+  }
+}
+
 // ─── Trigger Manual Scan ──────────────────────────────────────────────────────
 
 export async function triggerManualScan(
@@ -687,4 +759,26 @@ export async function callProcessNowAPI(
     throw new Error(err.error ?? `Processing failed: ${res.status}`)
   }
   return res.json() as Promise<{ processed: number }>
+}
+
+// ─── Update Source Name ─────────────────────────────────────────────────────
+
+export async function updateSourceName(
+  sourceId: string,
+  category: AutomationSource['category'],
+  name: string
+): Promise<void> {
+  if (category === 'youtube-channel') {
+    const { error } = await supabase
+      .from('youtube_channels')
+      .update({ channel_name: name, updated_at: new Date().toISOString() })
+      .eq('id', sourceId)
+    if (error) throw new Error(error.message)
+  } else if (category === 'youtube-playlist') {
+    const { error } = await supabase
+      .from('youtube_playlists')
+      .update({ playlist_name: name, updated_at: new Date().toISOString() })
+      .eq('id', sourceId)
+    if (error) throw new Error(error.message)
+  }
 }

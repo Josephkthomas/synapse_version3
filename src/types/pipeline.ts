@@ -62,5 +62,5 @@ export interface PipelineMetrics {
 }
 
 export type SourceTypeFilter = 'all' | 'YouTube' | 'Meeting' | 'Document' | 'Note'
-export type StatusFilter = 'all' | 'active' | 'completed' | 'failed'
+export type StatusFilter = 'all' | 'queued' | 'in_progress' | 'completed' | 'failed'
 export type SortOption = 'recent' | 'slowest' | 'entities' | 'confidence'

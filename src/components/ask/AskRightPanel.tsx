@@ -48,26 +48,32 @@ export function AskRightPanel({ context, highlightedCitationIndex = null, lastQu
           <div style={{ marginBottom: 20 }}>
             <SectionLabel>SOURCES</SectionLabel>
             <div className="flex flex-col" style={{ gap: 6, marginTop: 8 }}>
-              {context.sourceChunks.map((chunk, i) => {
-                const citIndex = getChunkCitationIndex(chunk, context.citations)
-                const isHighlighted = highlightedCitationIndex !== null && citIndex === highlightedCitationIndex
-                return (
-                  <div
-                    key={chunk.id}
-                    ref={el => {
-                      if (el && citIndex !== undefined) cardRefs.current.set(citIndex, el)
-                      else if (!el && citIndex !== undefined) cardRefs.current.delete(citIndex)
-                    }}
-                    data-chunk-index={i}
-                  >
-                    <SourceCard
-                      chunk={chunk}
-                      citationIndex={citIndex}
-                      isHighlighted={isHighlighted}
-                    />
-                  </div>
-                )
-              })}
+              {(() => {
+                let lastSourceId: string | null = null
+                return context.sourceChunks.map((chunk, i) => {
+                  const citIndex = getChunkCitationIndex(chunk, context.citations)
+                  const isHighlighted = highlightedCitationIndex !== null && citIndex === highlightedCitationIndex
+                  const isSameSource = lastSourceId === chunk.source_id
+                  lastSourceId = chunk.source_id
+                  return (
+                    <div
+                      key={chunk.id}
+                      ref={el => {
+                        if (el && citIndex !== undefined) cardRefs.current.set(citIndex, el)
+                        else if (!el && citIndex !== undefined) cardRefs.current.delete(citIndex)
+                      }}
+                      data-chunk-index={i}
+                    >
+                      <SourceCard
+                        chunk={chunk}
+                        citationIndex={citIndex}
+                        isHighlighted={isHighlighted}
+                        isSameSourceAsPrevious={isSameSource}
+                      />
+                    </div>
+                  )
+                })
+              })()}
             </div>
           </div>
         )}
