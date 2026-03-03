@@ -1740,6 +1740,61 @@ export async function fetchActiveQueueItems(userId: string): Promise<PipelineSes
   }
 }
 
+export async function fetchActiveMeetingItems(userId: string): Promise<PipelineSession[]> {
+  try {
+    // Use proven .contains() pattern for JSONB filtering (two queries for OR)
+    const [pendingRes, processingRes] = await Promise.all([
+      supabase
+        .from('knowledge_sources')
+        .select('id, title, metadata, created_at')
+        .eq('user_id', userId)
+        .eq('source_type', 'Meeting')
+        .contains('metadata', { extraction_status: 'pending' })
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('knowledge_sources')
+        .select('id, title, metadata, created_at')
+        .eq('user_id', userId)
+        .eq('source_type', 'Meeting')
+        .contains('metadata', { extraction_status: 'processing' })
+        .order('created_at', { ascending: false }),
+    ])
+
+    if (pendingRes.error) console.warn('[supabase] fetchActiveMeetingItems (pending):', pendingRes.error.message)
+    if (processingRes.error) console.warn('[supabase] fetchActiveMeetingItems (processing):', processingRes.error.message)
+
+    const allItems = [...(pendingRes.data ?? []), ...(processingRes.data ?? [])]
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return allItems.map((item: any) => {
+      const meta = item.metadata as Record<string, unknown> | null
+      const extractionStatus = (meta?.extraction_status as string) ?? 'pending'
+      return {
+        id: item.id,
+        source_name: item.title ?? 'Untitled Meeting',
+        source_type: 'Meeting',
+        source_content_preview: null,
+        extraction_mode: 'comprehensive',
+        anchor_emphasis: 'standard',
+        user_guidance: null,
+        selected_anchor_ids: null,
+        entity_count: 0,
+        relationship_count: 0,
+        extraction_duration_ms: null,
+        feedback_rating: null,
+        feedback_text: null,
+        created_at: item.created_at,
+        extracted_node_ids: null,
+        extracted_edge_ids: null,
+        _queueStatus: extractionStatus === 'processing' ? 'extracting' : 'pending',
+      }
+    }) as PipelineSession[]
+  } catch (err) {
+    console.warn('[supabase] fetchActiveMeetingItems failed:', err)
+    return []
+  }
+}
+
 // ─── Pipeline: Heatmap Data ─────────────────────────────────────────────────
 
 export interface HeatmapRawSession {

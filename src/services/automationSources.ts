@@ -176,10 +176,20 @@ export async function fetchAutomationSources(): Promise<AutomationSource[]> {
   if (meetingCount > 0) {
     // Detect provider from meeting metadata (e.g. { provider: 'circleback' })
     const providerCounts = new Map<string, number>()
+    // Count queue states from metadata.extraction_status
+    let meetingPending = 0
+    let meetingProcessing = 0
+    let meetingFailed = 0
+    let meetingComplete = 0
     for (const m of meetingRows) {
       const meta = m.metadata as Record<string, unknown> | null
       const provider = (meta?.provider as string) || 'unknown'
       providerCounts.set(provider, (providerCounts.get(provider) ?? 0) + 1)
+      const extractionStatus = meta?.extraction_status as string | undefined
+      if (extractionStatus === 'pending') meetingPending++
+      else if (extractionStatus === 'processing') meetingProcessing++
+      else if (extractionStatus === 'failed') meetingFailed++
+      else meetingComplete++
     }
     // Use the most common provider; default to Circleback since it's the only active integration
     const topProvider = [...providerCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'unknown'
@@ -205,13 +215,13 @@ export async function fetchAutomationSources(): Promise<AutomationSource[]> {
       handle: 'Meeting Integration',
       description: providerInfo.description,
       status: 'connected',
-      meetingsIngested: meetingCount,
+      meetingsIngested: meetingComplete,
       lastSync: toRelativeTime(meetingRows[0]?.created_at as string | null),
       mode: 'comprehensive',
       emphasis: 'standard',
       linkedAnchors: [],
       iconUrl: providerInfo.iconUrl,
-      queue: { pending: 0, processing: 0, complete: 0, failed: 0 },
+      queue: { pending: meetingPending, processing: meetingProcessing, complete: meetingComplete, failed: meetingFailed },
     })
   }
 

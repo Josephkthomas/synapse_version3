@@ -3,6 +3,7 @@ import { useAuth } from './useAuth'
 import {
   fetchPipelineHistory,
   fetchActiveQueueItems,
+  fetchActiveMeetingItems,
   type PipelineSession,
 } from '../services/supabase'
 import type {
@@ -101,9 +102,10 @@ export function usePipelineHistory(
       setError(null)
 
       try {
-        const [historyResult, activeResult] = await Promise.all([
+        const [historyResult, activeResult, meetingResult] = await Promise.all([
           fetchPipelineHistory(user.id, PAGE_SIZE, offset),
           offset === 0 ? fetchActiveQueueItems(user.id) : Promise.resolve(null),
+          offset === 0 ? fetchActiveMeetingItems(user.id) : Promise.resolve(null),
         ])
 
         if (append) {
@@ -112,7 +114,9 @@ export function usePipelineHistory(
           setSessions(historyResult.sessions)
         }
         setTotalCount(historyResult.totalCount)
-        if (activeResult !== null) setQueueItems(activeResult)
+        if (activeResult !== null || meetingResult !== null) {
+          setQueueItems([...(activeResult ?? []), ...(meetingResult ?? [])])
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load pipeline history')
       } finally {
