@@ -54,30 +54,6 @@ export interface ScanHistoryEntry {
   created_at: string
 }
 
-export interface YouTubeChannel {
-  id: string
-  user_id: string
-  channel_id: string
-  channel_name: string
-  channel_url: string
-  thumbnail_url: string | null
-  description: string | null
-  subscriber_count: number | null
-  auto_ingest: boolean
-  extraction_mode: string
-  anchor_emphasis: string
-  linked_anchor_ids: string[]
-  custom_instructions: string | null
-  min_video_duration: number
-  max_video_duration: number | null
-  last_checked_at: string | null
-  last_video_published_at: string | null
-  total_videos_ingested: number
-  is_active: boolean
-  created_at: string
-  updated_at: string
-}
-
 export interface YouTubeSettings {
   id: string
   user_id: string
@@ -96,9 +72,6 @@ export interface YouTubeSettings {
 
 export interface AutomationSummary {
   youtube: {
-    channelCount: number
-    activeChannelCount: number
-    totalVideosIngested: number
     playlistCount: number
     activePlaylistCount: number
     totalPlaylistVideos: number

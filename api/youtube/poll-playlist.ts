@@ -36,7 +36,6 @@ interface PlaylistItem {
   thumbnail_url: string;
   published_at: string;
   description: string | null;
-  uploader_channel_id: string;
 }
 
 // ─── AUTH ──────────────────────────────────────────────────────────────────────
@@ -130,7 +129,6 @@ async function fetchPlaylistItems(
         description: item.snippet?.description
           ? item.snippet.description.substring(0, 500)
           : null,
-        uploader_channel_id: item.snippet?.videoOwnerChannelId ?? '',
       });
     }
 
@@ -224,25 +222,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         (existingQueue ?? []).map((q: { video_id: string }) => q.video_id)
       );
 
-      // Cache of YouTube channel ID → internal channel table ID
-      const channelIdCache = new Map<string, string | null>();
-
-      const resolveChannelId = async (youtubeChannelId: string): Promise<string | null> => {
-        if (channelIdCache.has(youtubeChannelId)) {
-          return channelIdCache.get(youtubeChannelId)!;
-        }
-        const { data: ch } = await supabase
-          .from('youtube_channels')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('channel_id', youtubeChannelId)
-          .maybeSingle();
-
-        const internalId = (ch as { id: string } | null)?.id ?? null;
-        channelIdCache.set(youtubeChannelId, internalId);
-        return internalId;
-      };
-
       for (const playlist of userPlaylists) {
         let videosAdded = 0;
 
@@ -274,32 +253,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const newItems = items.filter(v => !existingVideoIds.has(v.video_id));
 
           if (newItems.length > 0) {
-            const queueItems = await Promise.all(
-              newItems.map(async item => {
-                // Try to find matching internal channel ID
-                const channelId = item.uploader_channel_id
-                  ? await resolveChannelId(item.uploader_channel_id)
-                  : null;
-
-                const row: Record<string, unknown> = {
-                  user_id: userId,
-                  video_id: item.video_id,
-                  video_title: item.title,
-                  video_url: item.url,
-                  thumbnail_url: item.thumbnail_url,
-                  published_at: item.published_at,
-                  status: 'pending',
-                  priority: 5,
-                  playlist_id: playlist.id,
-                };
-
-                // Only include channel_id if we found a matching internal channel
-                // (column may have FK constraint referencing youtube_channels.id)
-                if (channelId) row['channel_id'] = channelId;
-
-                return row;
-              })
-            );
+            const queueItems = newItems.map(item => ({
+              user_id: userId,
+              video_id: item.video_id,
+              video_title: item.title,
+              video_url: item.url,
+              thumbnail_url: item.thumbnail_url,
+              published_at: item.published_at,
+              status: 'pending',
+              priority: 5,
+              playlist_id: playlist.id,
+            }));
 
             const { data: inserted, error: insertError } = await supabase
               .from('youtube_ingestion_queue')

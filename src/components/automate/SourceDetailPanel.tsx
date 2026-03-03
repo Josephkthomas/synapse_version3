@@ -20,7 +20,7 @@ interface SourceDetailPanelProps {
 }
 
 function getCategoryColor(category: AutomationSource['category']): string {
-  if (category === 'youtube-channel' || category === 'youtube-playlist') return '#ef4444'
+  if (category === 'youtube-playlist') return '#ef4444'
   return '#3b82f6'
 }
 
@@ -558,7 +558,7 @@ export function SourceDetailPanel({ source, onClose, onRefetch }: SourceDetailPa
             <div>
               <div className="font-display" style={{ fontSize: 16, fontWeight: 700, color: 'var(--color-text-primary)', lineHeight: 1.2 }}>{source.name}</div>
               <div className="font-body" style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 2 }}>
-                {source.handle ?? source.channel ?? (isMeeting ? 'Meeting Integration' : source.category === 'youtube-playlist' ? 'YouTube Playlist' : 'YouTube Channel')}
+                {source.handle ?? source.channel ?? (isMeeting ? 'Meeting Integration' : 'YouTube Playlist')}
               </div>
             </div>
           </div>

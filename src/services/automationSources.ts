@@ -19,7 +19,7 @@ export const DEFAULT_SOURCE_SETTINGS: SourceSettings = {
 
 export interface AutomationSource {
   id: string
-  category: 'youtube-channel' | 'youtube-playlist' | 'meeting'
+  category: 'youtube-playlist' | 'meeting'
   name: string
   handle?: string
   channel?: string
@@ -84,10 +84,10 @@ function toRelativeTime(isoString: string | null | undefined): string {
   return `${weeks}w ago`
 }
 
-type RawQueueRow = { channel_id: string | null; playlist_id: string | null; status: string }
+type RawQueueRow = { playlist_id: string | null; status: string }
 
-function buildQueueCounts(rows: RawQueueRow[], id: string, field: 'channel_id' | 'playlist_id') {
-  const relevant = rows.filter(r => r[field] === id)
+function buildQueueCounts(rows: RawQueueRow[], id: string) {
+  const relevant = rows.filter(r => r.playlist_id === id)
   return {
     pending: relevant.filter(r => r.status === 'pending').length,
     processing: relevant.filter(r => r.status === 'fetching_transcript' || r.status === 'extracting').length,
@@ -102,12 +102,7 @@ export async function fetchAutomationSources(): Promise<AutomationSource[]> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return []
 
-  const [channelsRes, playlistsRes, queueRes, meetingsRes] = await Promise.all([
-    supabase
-      .from('youtube_channels')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('channel_name', { ascending: true }),
+  const [playlistsRes, queueRes, meetingsRes] = await Promise.all([
     supabase
       .from('youtube_playlists')
       .select('*')
@@ -115,7 +110,7 @@ export async function fetchAutomationSources(): Promise<AutomationSource[]> {
       .order('created_at', { ascending: false }),
     supabase
       .from('youtube_ingestion_queue')
-      .select('channel_id, playlist_id, status')
+      .select('playlist_id, status')
       .eq('user_id', user.id),
     supabase
       .from('knowledge_sources')
@@ -127,32 +122,10 @@ export async function fetchAutomationSources(): Promise<AutomationSource[]> {
   const queueRows: RawQueueRow[] = (queueRes.data ?? []) as RawQueueRow[]
   const sources: AutomationSource[] = []
 
-  // YouTube channels
-  for (const ch of (channelsRes.data ?? []) as Record<string, unknown>[]) {
-    const channelId = ch.id as string
-    sources.push({
-      id: channelId,
-      category: 'youtube-channel',
-      name: (ch.channel_name as string) || 'Unnamed Channel',
-      handle: (ch.channel_url as string)?.includes('@')
-        ? '@' + ((ch.channel_url as string).split('@')[1] ?? '').split('/')[0]
-        : undefined,
-      description: (ch.description as string) || undefined,
-      status: (ch.is_active as boolean) ? 'active' : 'paused',
-      videosIngested: (ch.total_videos_ingested as number) ?? 0,
-      lastScan: toRelativeTime(ch.last_checked_at as string | null),
-      mode: (ch.extraction_mode as string) || 'comprehensive',
-      emphasis: (ch.anchor_emphasis as string) || 'standard',
-      linkedAnchors: (ch.linked_anchor_ids as string[]) || [],
-      customInstructions: (ch.custom_instructions as string) || undefined,
-      queue: buildQueueCounts(queueRows, channelId, 'channel_id'),
-    })
-  }
-
   // YouTube playlists
   for (const pl of (playlistsRes.data ?? []) as Record<string, unknown>[]) {
     const plStatus = (pl.status as string) === 'active' || (pl.is_active as boolean) ? 'active' : 'paused'
-    const plQueue = buildQueueCounts(queueRows, pl.id as string, 'playlist_id')
+    const plQueue = buildQueueCounts(queueRows, pl.id as string)
     sources.push({
       id: pl.id as string,
       category: 'youtube-playlist',
@@ -232,23 +205,18 @@ export async function fetchAutomationSources(): Promise<AutomationSource[]> {
 
 export async function fetchSourceQueue(
   sourceId: string,
-  category: AutomationSource['category'] = 'youtube-channel'
+  _category: AutomationSource['category'] = 'youtube-playlist'
 ): Promise<QueueItemDisplay[]> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return []
 
-  let baseQuery = supabase
+  const baseQuery = supabase
     .from('youtube_ingestion_queue')
     .select('*')
     .eq('user_id', user.id)
+    .eq('playlist_id', sourceId)
     .order('created_at', { ascending: false })
     .limit(20)
-
-  if (category === 'youtube-playlist') {
-    baseQuery = baseQuery.eq('playlist_id', sourceId)
-  } else {
-    baseQuery = baseQuery.eq('channel_id', sourceId)
-  }
 
   const { data, error } = await baseQuery
 
@@ -390,20 +358,6 @@ export async function fetchIngestedContent(
     }))
   }
 
-  // ── YouTube channels ─────────────────────────────────────────────────────
-  // Queue items carry channel_id = the Supabase UUID of the youtube_channels row.
-  if (category === 'youtube-channel') {
-    const { data } = await supabase
-      .from('youtube_ingestion_queue')
-      .select('id, video_title, created_at, nodes_created, edges_created')
-      .eq('user_id', user.id)
-      .eq('channel_id', sourceId)
-      .eq('status', 'completed')
-      .order('created_at', { ascending: false })
-      .limit(50)
-    return mapQueueRows((data ?? []) as Record<string, unknown>[])
-  }
-
   // ── YouTube playlists ────────────────────────────────────────────────────
   // Strategy:
   //   Tier 1 – Client-side YouTube API via VITE_YOUTUBE_API_KEY env var.
@@ -505,13 +459,7 @@ export async function updateSourceSettings(
     updated_at: new Date().toISOString(),
   }
 
-  if (category === 'youtube-channel') {
-    const { error } = await supabase
-      .from('youtube_channels')
-      .update(baseUpdate)
-      .eq('id', sourceId)
-    if (error) throw new Error(error.message)
-  } else if (category === 'youtube-playlist') {
+  if (category === 'youtube-playlist') {
     const { error } = await supabase
       .from('youtube_playlists')
       .update(baseUpdate)
@@ -519,65 +467,6 @@ export async function updateSourceSettings(
     if (error) throw new Error(error.message)
   }
   // meeting integration: no persistent record to update
-}
-
-// ─── Add YouTube Channel ──────────────────────────────────────────────────────
-
-export async function addYouTubeChannel(
-  channelUrl: string,
-  settings: SourceSettings = DEFAULT_SOURCE_SETTINGS
-): Promise<AutomationSource> {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Not authenticated')
-
-  let channelName = channelUrl
-  const handleMatch = channelUrl.match(/@([\w.-]+)/)
-  if (handleMatch) {
-    channelName = '@' + handleMatch[1]
-  }
-
-  const isValidUrl = channelUrl.includes('youtube.com/') || channelUrl.includes('youtu.be/')
-  if (!isValidUrl) throw new Error('Invalid YouTube channel URL')
-
-  const { data, error } = await supabase
-    .from('youtube_channels')
-    .insert({
-      user_id: user.id,
-      channel_id: channelUrl,
-      channel_name: channelName,
-      channel_url: channelUrl,
-      auto_ingest: true,
-      extraction_mode: settings.mode,
-      anchor_emphasis: settings.emphasis,
-      linked_anchor_ids: settings.linkedAnchorIds,
-      custom_instructions: settings.customInstructions ?? null,
-      is_active: true,
-      total_videos_ingested: 0,
-      min_video_duration: 0,
-    })
-    .select()
-    .single()
-
-  if (error) {
-    if (error.code === '23505') throw new Error('This channel is already connected.')
-    throw new Error(error.message)
-  }
-
-  const ch = data as Record<string, unknown>
-  return {
-    id: ch.id as string,
-    category: 'youtube-channel',
-    name: ch.channel_name as string,
-    handle: handleMatch ? '@' + handleMatch[1] : undefined,
-    status: 'active',
-    videosIngested: 0,
-    lastScan: 'Never',
-    mode: settings.mode,
-    emphasis: settings.emphasis,
-    linkedAnchors: settings.linkedAnchorIds,
-    customInstructions: settings.customInstructions,
-    queue: { pending: 0, processing: 0, complete: 0, failed: 0 },
-  }
 }
 
 // ─── Add YouTube Playlist ─────────────────────────────────────────────────────
@@ -647,13 +536,7 @@ export async function updateSourceStatus(
 ): Promise<void> {
   const isActive = status === 'active'
 
-  if (category === 'youtube-channel') {
-    const { error } = await supabase
-      .from('youtube_channels')
-      .update({ is_active: isActive, updated_at: new Date().toISOString() })
-      .eq('id', sourceId)
-    if (error) throw new Error(error.message)
-  } else if (category === 'youtube-playlist') {
+  if (category === 'youtube-playlist') {
     const { error } = await supabase
       .from('youtube_playlists')
       .update({ is_active: isActive, status: isActive ? 'active' : 'paused', updated_at: new Date().toISOString() })
@@ -668,13 +551,7 @@ export async function disconnectSource(
   sourceId: string,
   category: AutomationSource['category']
 ): Promise<void> {
-  if (category === 'youtube-channel') {
-    const { error } = await supabase
-      .from('youtube_channels')
-      .update({ is_active: false, auto_ingest: false, updated_at: new Date().toISOString() })
-      .eq('id', sourceId)
-    if (error) throw new Error(error.message)
-  } else if (category === 'youtube-playlist') {
+  if (category === 'youtube-playlist') {
     const { error } = await supabase
       .from('youtube_playlists')
       .update({ is_active: false, status: 'paused', updated_at: new Date().toISOString() })
@@ -692,21 +569,7 @@ export async function deleteSource(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
 
-  if (category === 'youtube-channel') {
-    // Delete queue items first (may have FK constraint)
-    await supabase
-      .from('youtube_ingestion_queue')
-      .delete()
-      .eq('user_id', user.id)
-      .eq('channel_id', sourceId)
-    // Delete the channel record
-    const { error } = await supabase
-      .from('youtube_channels')
-      .delete()
-      .eq('id', sourceId)
-      .eq('user_id', user.id)
-    if (error) throw new Error(error.message)
-  } else if (category === 'youtube-playlist') {
+  if (category === 'youtube-playlist') {
     // Delete queue items first
     await supabase
       .from('youtube_ingestion_queue')
@@ -729,13 +592,7 @@ export async function triggerManualScan(
   sourceId: string,
   category: AutomationSource['category']
 ): Promise<void> {
-  if (category === 'youtube-channel') {
-    const { error } = await supabase
-      .from('youtube_channels')
-      .update({ last_checked_at: null, updated_at: new Date().toISOString() })
-      .eq('id', sourceId)
-    if (error) throw new Error(error.message)
-  } else if (category === 'youtube-playlist') {
+  if (category === 'youtube-playlist') {
     const { error } = await supabase
       .from('youtube_playlists')
       .update({ updated_at: new Date().toISOString() })
@@ -786,13 +643,7 @@ export async function updateSourceName(
   category: AutomationSource['category'],
   name: string
 ): Promise<void> {
-  if (category === 'youtube-channel') {
-    const { error } = await supabase
-      .from('youtube_channels')
-      .update({ channel_name: name, updated_at: new Date().toISOString() })
-      .eq('id', sourceId)
-    if (error) throw new Error(error.message)
-  } else if (category === 'youtube-playlist') {
+  if (category === 'youtube-playlist') {
     const { error } = await supabase
       .from('youtube_playlists')
       .update({ playlist_name: name, updated_at: new Date().toISOString() })

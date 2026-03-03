@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ArrowLeft, Copy, Check } from 'lucide-react'
 import type { AutomationSource, SourceSettings } from '../../services/automationSources'
-import { addYouTubeChannel, addYouTubePlaylist, DEFAULT_SOURCE_SETTINGS } from '../../services/automationSources'
+import { addYouTubePlaylist, DEFAULT_SOURCE_SETTINGS } from '../../services/automationSources'
 import { useSettings } from '../../hooks/useSettings'
 import { useAuth } from '../../hooks/useAuth'
 import { EXTRACTION_MODES, ANCHOR_EMPHASIS_LEVELS } from '../../config/extractionModes'
@@ -11,10 +11,9 @@ interface NewSourcePanelProps {
   onSourceAdded: (source: AutomationSource) => void
 }
 
-type SourceTypeId = 'youtube-channel' | 'youtube-playlist' | 'circleback' | 'firefly'
+type SourceTypeId = 'youtube-playlist' | 'circleback' | 'firefly'
 
 const SOURCE_TYPES: { id: SourceTypeId; logo: string; label: string; description: string }[] = [
-  { id: 'youtube-channel', logo: '/logos/youtube.svg', label: 'YouTube Channel', description: 'Auto-ingest every video from a channel' },
   { id: 'youtube-playlist', logo: '/logos/youtube.svg', label: 'YouTube Playlist', description: 'Sync all videos in a specific playlist' },
   { id: 'circleback', logo: '/logos/circleback.jpeg', label: 'Circleback', description: 'Auto-ingest meeting transcripts via webhook' },
   { id: 'firefly', logo: '/logos/fireflies.jpeg', label: 'Firefly', description: 'Auto-ingest Firefly.ai meeting notes' },
@@ -326,23 +325,7 @@ function StepConfigure({ sourceType, onBack, onSourceAdded }: StepConfigureProps
 
   const handleConnect = async () => {
     setError(null)
-    if (sourceType === 'youtube-channel') {
-      const trimmed = url.trim()
-      if (!trimmed) { setError('Please enter a YouTube channel URL.'); return }
-      if (!trimmed.includes('youtube.com/') && !trimmed.includes('youtu.be/')) {
-        setError('Please enter a valid YouTube channel URL.')
-        return
-      }
-      setLoading(true)
-      try {
-        const source = await addYouTubeChannel(trimmed, settings)
-        onSourceAdded(source)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to add channel')
-      } finally {
-        setLoading(false)
-      }
-    } else if (sourceType === 'youtube-playlist') {
+    if (sourceType === 'youtube-playlist') {
       const trimmed = url.trim()
       if (!trimmed) { setError('Please enter a YouTube playlist URL.'); return }
       if (!trimmed.includes('youtube.com/playlist') && !trimmed.includes('list=')) {
@@ -404,13 +387,13 @@ function StepConfigure({ sourceType, onBack, onSourceAdded }: StepConfigureProps
         {/* ── YouTube URL input ── */}
         {!isMeeting && (
           <div style={{ marginBottom: 24 }}>
-            <SL>{sourceType === 'youtube-channel' ? 'Channel URL' : 'Playlist URL'}</SL>
+            <SL>Playlist URL</SL>
             <input
               type="text"
               value={url}
               onChange={e => { setUrl(e.target.value); setError(null) }}
               onKeyDown={e => { if (e.key === 'Enter') void handleConnect() }}
-              placeholder={sourceType === 'youtube-channel' ? 'https://youtube.com/@channelname' : 'https://youtube.com/playlist?list=…'}
+              placeholder="https://youtube.com/playlist?list=…"
               style={{ ...INPUT_STYLE, marginBottom: error ? 6 : 0 }}
               {...FOCUS_HANDLERS}
             />

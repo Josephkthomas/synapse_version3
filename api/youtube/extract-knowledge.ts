@@ -631,23 +631,6 @@ Return an empty array if no genuine cross-source connections exist.`;
       })
       .eq('id', item.id);
 
-    // Update channel total_videos_ingested
-    if (item.channel_id) {
-      try {
-        const { data: ch } = await supabase
-          .from('youtube_channels')
-          .select('total_videos_ingested')
-          .eq('id', item.channel_id)
-          .maybeSingle();
-        if (ch) {
-          await supabase
-            .from('youtube_channels')
-            .update({ total_videos_ingested: ((ch as { total_videos_ingested: number }).total_videos_ingested ?? 0) + 1 })
-            .eq('id', item.channel_id);
-        }
-      } catch { /* best-effort */ }
-    }
-
     // Save extraction session record
     await supabase.from('extraction_sessions').insert({
       user_id: item.user_id,
@@ -750,8 +733,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .select(`
         id, user_id, channel_id, video_id, video_title, video_url,
         thumbnail_url, published_at, duration_seconds, transcript, status,
-        retry_count, max_retries, error_message,
-        youtube_channels (
+        retry_count, max_retries, error_message, playlist_id,
+        youtube_playlists (
           extraction_mode,
           anchor_emphasis,
           linked_anchor_ids,
@@ -783,9 +766,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // Flatten joined channel settings
+    // Flatten joined playlist settings
     const items: QueueItem[] = (pendingItems as Array<Record<string, unknown>>).map(row => {
-      const channel = row['youtube_channels'] as Record<string, unknown> | null;
+      const playlist = row['youtube_playlists'] as Record<string, unknown> | null;
       return {
         id: row['id'] as string,
         user_id: row['user_id'] as string,
@@ -801,10 +784,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         retry_count: (row['retry_count'] as number) ?? 0,
         max_retries: (row['max_retries'] as number) ?? 3,
         error_message: row['error_message'] as string | null,
-        extraction_mode: channel?.['extraction_mode'] as string | undefined,
-        anchor_emphasis: channel?.['anchor_emphasis'] as string | undefined,
-        linked_anchor_ids: (channel?.['linked_anchor_ids'] as string[]) ?? [],
-        custom_instructions: channel?.['custom_instructions'] as string | null | undefined,
+        extraction_mode: playlist?.['extraction_mode'] as string | undefined,
+        anchor_emphasis: playlist?.['anchor_emphasis'] as string | undefined,
+        linked_anchor_ids: (playlist?.['linked_anchor_ids'] as string[]) ?? [],
+        custom_instructions: playlist?.['custom_instructions'] as string | null | undefined,
       };
     });
 

@@ -1,17 +1,15 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from './useAuth'
-import type { AutomationSummary, YouTubeChannel, ScanHistoryEntry } from '../types/automate'
+import type { AutomationSummary, ScanHistoryEntry } from '../types/automate'
 import type { YouTubePlaylist } from '../types/youtube'
 import {
   getAutomationSummary,
-  getYouTubeChannels,
   getConnectedPlaylists,
   getScanHistory,
 } from '../services/supabase'
 
 export interface UseAutomationStatusReturn {
   summary: AutomationSummary | null
-  channels: YouTubeChannel[]
   playlists: YouTubePlaylist[]
   scanHistory: ScanHistoryEntry[]
   isLoading: boolean
@@ -22,7 +20,6 @@ export interface UseAutomationStatusReturn {
 export function useAutomationStatus(): UseAutomationStatusReturn {
   const { user } = useAuth()
   const [summary, setSummary] = useState<AutomationSummary | null>(null)
-  const [channels, setChannels] = useState<YouTubeChannel[]>([])
   const [playlists, setPlaylists] = useState<YouTubePlaylist[]>([])
   const [scanHistory, setScanHistory] = useState<ScanHistoryEntry[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -35,15 +32,13 @@ export function useAutomationStatus(): UseAutomationStatusReturn {
     setError(null)
 
     try {
-      const [summaryResult, channelsResult, playlistsResult, historyResult] = await Promise.all([
+      const [summaryResult, playlistsResult, historyResult] = await Promise.all([
         getAutomationSummary(user.id),
-        getYouTubeChannels(user.id),
         getConnectedPlaylists(user.id),
         getScanHistory(user.id),
       ])
 
       setSummary(summaryResult)
-      setChannels(channelsResult)
       setPlaylists(playlistsResult)
       setScanHistory(historyResult)
     } catch (err) {
@@ -61,7 +56,6 @@ export function useAutomationStatus(): UseAutomationStatusReturn {
 
   return {
     summary,
-    channels,
     playlists,
     scanHistory,
     isLoading,

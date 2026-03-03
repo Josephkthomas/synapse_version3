@@ -4,7 +4,7 @@ import { fetchSourceQueue } from '../services/automationSources'
 
 export function useSourceQueue(
   sourceId: string | null,
-  category: AutomationSource['category'] = 'youtube-channel'
+  category: AutomationSource['category'] = 'youtube-playlist'
 ): {
   items: QueueItemDisplay[]
   loading: boolean

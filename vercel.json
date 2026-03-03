@@ -4,10 +4,6 @@
   ],
   "crons": [
     {
-      "path": "/api/youtube/poll",
-      "schedule": "*/15 * * * *"
-    },
-    {
       "path": "/api/youtube/poll-playlist",
       "schedule": "*/5 * * * *"
     },

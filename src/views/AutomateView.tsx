@@ -6,21 +6,19 @@ import { SourceDetailPanel } from '../components/automate/SourceDetailPanel'
 import { NewSourcePanel } from '../components/automate/NewSourcePanel'
 import type { AutomationSource } from '../services/automationSources'
 
-type FilterType = 'all' | 'youtube-channel' | 'youtube-playlist' | 'meeting'
+type FilterType = 'all' | 'youtube-playlist' | 'meeting'
 
 const FILTERS: { key: FilterType; label: string }[] = [
   { key: 'all', label: 'All Sources' },
   { key: 'meeting', label: 'Meeting Services' },
   { key: 'youtube-playlist', label: 'YouTube Playlists' },
-  { key: 'youtube-channel', label: 'YouTube Channels' },
 ]
 
-// Ordered groups for "All" view: Meeting → Playlist → Channel
-const CATEGORY_ORDER: AutomationSource['category'][] = ['meeting', 'youtube-playlist', 'youtube-channel']
+// Ordered groups for "All" view: Meeting → Playlist
+const CATEGORY_ORDER: AutomationSource['category'][] = ['meeting', 'youtube-playlist']
 const CATEGORY_LABELS: Record<AutomationSource['category'], string> = {
   'meeting': 'Meeting Services',
   'youtube-playlist': 'YouTube Playlists',
-  'youtube-channel': 'YouTube Channels',
 }
 
 // ─── Layout constants ────────────────────────────────────────────────────────
@@ -269,7 +267,7 @@ export function AutomateView() {
                 No sources connected yet
               </h2>
               <p className="font-body" style={{ fontSize: 13, color: 'var(--color-text-secondary)', maxWidth: 280, margin: '0 auto' }}>
-                Use the panel on the right to connect your first YouTube channel, playlist, or meeting service.
+                Use the panel on the right to connect your first YouTube playlist or meeting service.
               </p>
             </div>
           )}
@@ -320,7 +318,7 @@ export function AutomateView() {
                   Connect a New Source
                 </div>
                 <div className="font-body" style={{ fontSize: 11, color: 'var(--color-text-placeholder)', marginTop: 2 }}>
-                  YouTube channel, playlist, or meeting service
+                  YouTube playlist or meeting service
                 </div>
               </button>
             </div>

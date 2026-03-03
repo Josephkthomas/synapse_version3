@@ -4,7 +4,7 @@ import type { NodeFilters, PaginationOptions, NodeWithMeta, NodeNeighbor } from 
 import type { CrossConnection } from '../types/feed'
 import type { ExtractionSession } from '../types/extraction'
 import type { YouTubePlaylist, QueueStats, PlaylistSettings } from '../types/youtube'
-import type { QueueItem, QueueStatusFilter, ScanHistoryEntry, YouTubeChannel, YouTubeSettings, AutomationSummary } from '../types/automate'
+import type { QueueItem, QueueStatusFilter, ScanHistoryEntry, YouTubeSettings, AutomationSummary } from '../types/automate'
 import type { DigestHistoryEntry, DigestModuleInput, DigestChannelInput } from '../types/digest'
 import { generateSynapseCode } from './youtube'
 
@@ -1251,24 +1251,6 @@ export async function getExtractionHistory(
   }
 }
 
-// ─── Automate: YouTube Channels ──────────────────────────────────────────────
-
-export async function getYouTubeChannels(userId: string): Promise<YouTubeChannel[]> {
-  try {
-    const { data, error } = await supabase
-      .from('youtube_channels')
-      .select('*')
-      .eq('user_id', userId)
-      .order('channel_name', { ascending: true })
-
-    if (error) throw error
-    return (data ?? []) as YouTubeChannel[]
-  } catch (err) {
-    console.warn('[supabase] youtube_channels fetch failed (table may not exist):', err)
-    return []
-  }
-}
-
 // ─── Automate: YouTube Settings ──────────────────────────────────────────────
 
 export async function getYouTubeSettings(userId: string): Promise<YouTubeSettings | null> {
@@ -1430,22 +1412,12 @@ export async function getScanHistory(
 
 export async function getAutomationSummary(userId: string): Promise<AutomationSummary> {
   const [
-    channelData,
     playlistData,
     meetingCount,
     extensionCount,
     queueStatsResult,
     lastCompletedAt,
   ] = await Promise.all([
-    (async () => {
-      try {
-        const { data } = await supabase
-          .from('youtube_channels')
-          .select('is_active, total_videos_ingested')
-          .eq('user_id', userId)
-        return (data ?? []) as { is_active: boolean; total_videos_ingested: number }[]
-      } catch { return [] as { is_active: boolean; total_videos_ingested: number }[] }
-    })(),
     (async () => {
       try {
         const { data } = await supabase
@@ -1493,9 +1465,6 @@ export async function getAutomationSummary(userId: string): Promise<AutomationSu
 
   return {
     youtube: {
-      channelCount: channelData.length,
-      activeChannelCount: channelData.filter(c => c.is_active).length,
-      totalVideosIngested: channelData.reduce((sum, c) => sum + (c.total_videos_ingested ?? 0), 0),
       playlistCount: playlistData.length,
       activePlaylistCount: playlistData.filter(p => p.is_active).length,
       totalPlaylistVideos: playlistData.reduce((sum, p) => sum + (p.known_video_count ?? 0), 0),
@@ -1680,6 +1649,7 @@ export interface PipelineSession {
   created_at: string
   extracted_node_ids: string[] | null
   extracted_edge_ids: string[] | null
+  _provider?: string | null
 }
 
 export async function fetchPipelineHistory(
@@ -1743,8 +1713,8 @@ export async function fetchActiveQueueItems(userId: string): Promise<PipelineSes
       created_at: item.created_at,
       extracted_node_ids: null,
       extracted_edge_ids: null,
-      // Extra field to mark as queue item
       _queueStatus: item.status,
+      _provider: 'youtube',
     })) as PipelineSession[]
   } catch (err) {
     console.warn('[supabase] youtube_ingestion_queue fetch failed:', err)
@@ -1799,6 +1769,7 @@ export async function fetchActiveMeetingItems(userId: string): Promise<PipelineS
         extracted_node_ids: null,
         extracted_edge_ids: null,
         _queueStatus: extractionStatus === 'processing' ? 'extracting' : 'pending',
+        _provider: (meta?.provider as string) ?? 'circleback',
       }
     }) as PipelineSession[]
   } catch (err) {

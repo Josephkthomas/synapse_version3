@@ -1,14 +1,12 @@
-import { YouTubeChannelsCard } from './YouTubeChannelsCard'
 import { YouTubePlaylistsCard } from './YouTubePlaylistsCard'
 import { MeetingIntegrationsCard } from './MeetingIntegrationsCard'
 import { ChromeExtensionCard } from './ChromeExtensionCard'
 import { IntegrationStatusCard } from './IntegrationStatusCard'
-import type { AutomationSummary, YouTubeChannel } from '../../types/automate'
+import type { AutomationSummary } from '../../types/automate'
 import type { YouTubePlaylist } from '../../types/youtube'
 
 interface IntegrationDashboardProps {
   summary: AutomationSummary
-  channels: YouTubeChannel[]
   playlists: YouTubePlaylist[]
   queueSectionRef?: React.RefObject<HTMLDivElement | null>
 }
@@ -24,7 +22,7 @@ function formatRelativeTime(ts: string | null): string {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
-export function IntegrationDashboard({ summary, channels, playlists, queueSectionRef }: IntegrationDashboardProps) {
+export function IntegrationDashboard({ summary, playlists, queueSectionRef }: IntegrationDashboardProps) {
   const queueIsActive = summary.queue.processing > 0
   const queueStatus = queueIsActive ? 'active' : 'idle'
   const queueDescription = `${summary.queue.pending} pending · ${summary.queue.failed} failed`
@@ -32,7 +30,6 @@ export function IntegrationDashboard({ summary, channels, playlists, queueSectio
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <YouTubeChannelsCard channels={channels} summary={summary} />
       <YouTubePlaylistsCard playlists={playlists} summary={summary} />
       <MeetingIntegrationsCard summary={summary} />
 
