@@ -1,14 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Layers, GripVertical } from 'lucide-react'
 import { GreetingHeader } from './GreetingHeader'
-import { ConnectionDiscoveryCard } from './ConnectionDiscoveryCard'
 import { FeedTab } from './FeedTab'
 import { HomeFeedDetail } from './HomeFeedDetail'
 import { useDailyStats } from '../../hooks/useDailyStats'
 import { useActivityFeed } from '../../hooks/useActivityFeed'
-import { useRecentCrossConnection } from '../../hooks/useCrossConnections'
 import { useAuth } from '../../hooks/useAuth'
-import { useSettings } from '../../hooks/useSettings'
 import { getGraphStats } from '../../services/supabase'
 import type { FeedItem } from '../../types/feed'
 
@@ -21,66 +18,6 @@ interface GraphStatsData {
   nodeCount: number
   edgeCount: number
   sourceCount: number
-}
-
-function QuickStatsRow({ stats, anchorCount, loading }: {
-  stats: GraphStatsData | null
-  anchorCount: number
-  loading: boolean
-}) {
-  const items = [
-    { label: 'Nodes', value: stats?.nodeCount ?? 0 },
-    { label: 'Edges', value: stats?.edgeCount ?? 0 },
-    { label: 'Sources', value: stats?.sourceCount ?? 0 },
-    { label: 'Anchors', value: anchorCount },
-  ]
-
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
-      {items.map(item => (
-        <div
-          key={item.label}
-          style={{
-            background: 'var(--color-bg-card)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 10,
-            padding: '16px 20px',
-            textAlign: 'center',
-          }}
-        >
-          {loading ? (
-            <div
-              className="rounded animate-pulse mx-auto"
-              style={{ width: 40, height: 28, background: 'var(--color-bg-inset)' }}
-            />
-          ) : (
-            <div
-              className="font-display"
-              style={{
-                fontSize: 28,
-                fontWeight: 800,
-                color: 'var(--color-text-primary)',
-                letterSpacing: '-0.03em',
-              }}
-            >
-              {item.value.toLocaleString()}
-            </div>
-          )}
-          <div
-            className="font-body"
-            style={{
-              fontSize: 11,
-              fontWeight: 500,
-              color: 'var(--color-text-secondary)',
-              marginTop: 2,
-            }}
-          >
-            {item.label}
-          </div>
-        </div>
-      ))}
-    </div>
-  )
 }
 
 function HomeEmptyDetail() {
@@ -120,11 +57,11 @@ export function HomeView() {
   const dragStartPct = useRef(DEFAULT_LEFT_PCT)
 
   const { user } = useAuth()
-  const { anchors } = useSettings()
+
   const { stats, loading: statsLoading, error: statsError } = useDailyStats()
   const { items: feedItems, loading: feedLoading, error: feedError, hasMore, loadMore, refetch } =
     useActivityFeed()
-  const { connection: recentConnection } = useRecentCrossConnection(feedItems)
+
 
   useEffect(() => {
     if (!user) return
@@ -224,6 +161,8 @@ export function HomeView() {
           stats={stats}
           loading={statsLoading}
           error={statsError}
+          graphStats={graphStats}
+          graphStatsLoading={graphStatsLoading}
         />
       </div>
 
@@ -246,16 +185,6 @@ export function HomeView() {
             transition: isDragging ? 'none' : 'width 0.2s ease',
           }}
         >
-          <QuickStatsRow
-            stats={graphStats}
-            anchorCount={anchors.length}
-            loading={graphStatsLoading}
-          />
-
-          {!feedLoading && recentConnection && (
-            <ConnectionDiscoveryCard connection={recentConnection} />
-          )}
-
           <FeedTab
             items={feedItems}
             loading={feedLoading}

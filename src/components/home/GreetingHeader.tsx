@@ -9,13 +9,21 @@ function getGreeting(): string {
   return 'Good evening'
 }
 
+interface GraphStatsData {
+  nodeCount: number
+  edgeCount: number
+  sourceCount: number
+}
+
 interface GreetingHeaderProps {
   stats: DailyStats | null
   loading: boolean
   error: Error | null
+  graphStats?: GraphStatsData | null
+  graphStatsLoading?: boolean
 }
 
-export function GreetingHeader({ stats, loading, error }: GreetingHeaderProps) {
+export function GreetingHeader({ stats, loading, error, graphStats, graphStatsLoading }: GreetingHeaderProps) {
   const { profile } = useSettings()
   const { user } = useAuth()
 
@@ -26,43 +34,30 @@ export function GreetingHeader({ stats, loading, error }: GreetingHeaderProps) {
     'there'
 
   const renderStatsLine = () => {
-    if (loading) {
-      return (
-        <span className="font-body" style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-          Loading…
-        </span>
-      )
+    const sty = { fontSize: 12, color: 'var(--color-text-secondary)' } as const
+
+    if (loading && graphStatsLoading) {
+      return <span className="font-body" style={sty}>Loading…</span>
     }
 
-    if (error || !stats) {
-      return (
-        <span className="font-body" style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-          — sources · — entities · — relationships
-        </span>
-      )
+    const parts: string[] = []
+
+    // Daily activity
+    if (!loading && !error && stats) {
+      if (stats.sourcesProcessed > 0) parts.push(`${stats.sourcesProcessed} source${stats.sourcesProcessed === 1 ? '' : 's'} today`)
     }
 
-    if (
-      stats.sourcesProcessed === 0 &&
-      stats.newEntities === 0 &&
-      stats.relationshipsDiscovered === 0
-    ) {
-      return (
-        <span className="font-body" style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-          No activity yet today
-        </span>
-      )
+    // Overall graph totals
+    if (!graphStatsLoading && graphStats) {
+      parts.push(`${graphStats.nodeCount.toLocaleString()} entities`)
+      parts.push(`${graphStats.edgeCount.toLocaleString()} relationships`)
     }
 
-    return (
-      <span className="font-body" style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-        {stats.sourcesProcessed} sources today
-        {' · '}
-        {stats.newEntities} new entities
-        {' · '}
-        {stats.relationshipsDiscovered} relationships
-      </span>
-    )
+    if (parts.length === 0) {
+      return <span className="font-body" style={sty}>No activity yet today</span>
+    }
+
+    return <span className="font-body" style={sty}>{parts.join(' · ')}</span>
   }
 
   return (

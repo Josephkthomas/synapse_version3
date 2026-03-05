@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { X, RefreshCw, Loader2 } from 'lucide-react'
 import { SectionLabel } from '../ui/SectionLabel'
 import { getEntityColor } from '../../config/entityTypes'
@@ -37,10 +38,15 @@ const PROVENANCE_LABELS: Record<string, string> = {
 }
 
 export function SourceDetail({ source, onClose }: SourceDetailProps) {
+  const navigate = useNavigate()
   const { setRightPanelContent } = useGraphContext()
   const [entities, setEntities] = useState<KnowledgeNode[]>([])
   const [loadingEntities, setLoadingEntities] = useState(true)
   const [crossConnections, setCrossConnections] = useState<CrossConnection[]>([])
+
+  // Re-extract state
+  const [showReExtract, setShowReExtract] = useState(false)
+  const [reExtractInstructions, setReExtractInstructions] = useState('')
 
   // Summary state
   const [currentSummary, setCurrentSummary] = useState<string | null>(source.summary ?? null)
@@ -606,7 +612,7 @@ export function SourceDetail({ source, onClose }: SourceDetailProps) {
         </div>
       )}
 
-      {/* Re-extract button */}
+      {/* Re-extract */}
       <div className="mt-auto pt-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
         <button
           type="button"
@@ -614,17 +620,93 @@ export function SourceDetail({ source, onClose }: SourceDetailProps) {
           style={{
             fontSize: 12,
             padding: '7px 0',
-            background: 'var(--color-bg-inset)',
-            border: '1px solid var(--border-default)',
-            color: 'var(--color-text-body)',
-            opacity: 0.5,
+            background: showReExtract ? 'var(--color-accent-50)' : 'var(--color-bg-inset)',
+            border: showReExtract ? '1px solid rgba(214,58,0,0.2)' : '1px solid var(--border-default)',
+            color: showReExtract ? 'var(--color-accent-500)' : 'var(--color-text-body)',
+            ...(!source.content ? { opacity: 0.4, cursor: 'not-allowed' } : {}),
+            transition: 'all 0.15s ease',
           }}
-          title="Available after extraction pipeline is built"
-          disabled
+          disabled={!source.content}
+          title={!source.content ? 'No source content available' : 'Re-run extraction with new settings'}
+          onClick={() => setShowReExtract(v => !v)}
         >
           <RefreshCw size={12} />
           Re-extract
         </button>
+
+        {showReExtract && (
+          <div style={{ marginTop: 8, padding: '10px 12px', background: 'var(--color-bg-inset)', borderRadius: 8, border: '1px solid var(--border-subtle)' }}>
+            <label className="font-body font-semibold" style={{ fontSize: 11, color: 'var(--color-text-secondary)', display: 'block', marginBottom: 6 }}>
+              Custom instructions (optional)
+            </label>
+            <textarea
+              value={reExtractInstructions}
+              onChange={e => setReExtractInstructions(e.target.value)}
+              placeholder="e.g., Focus on technical concepts, ignore personal names…"
+              className="font-body w-full"
+              style={{
+                fontSize: 12,
+                color: 'var(--color-text-body)',
+                background: 'var(--color-bg-card)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 6,
+                padding: '6px 8px',
+                resize: 'vertical',
+                minHeight: 56,
+                maxHeight: 120,
+                lineHeight: 1.4,
+                outline: 'none',
+              }}
+              onFocus={e => { e.currentTarget.style.borderColor = 'rgba(214,58,0,0.3)' }}
+              onBlur={e => { e.currentTarget.style.borderColor = 'var(--border-subtle)' }}
+            />
+            <div className="flex items-center gap-2" style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                className="font-body font-semibold cursor-pointer"
+                style={{
+                  fontSize: 11,
+                  padding: '5px 14px',
+                  borderRadius: 6,
+                  background: 'var(--color-accent-500)',
+                  border: 'none',
+                  color: '#fff',
+                }}
+                onClick={() => {
+                  navigate('/capture', {
+                    state: {
+                      reExtractSource: {
+                        id: source.id,
+                        title: source.title,
+                        content: source.content,
+                        sourceType: source.source_type,
+                        sourceUrl: source.source_url,
+                        customInstructions: reExtractInstructions.trim() || undefined,
+                      },
+                    },
+                  })
+                }}
+              >
+                Start Re-extraction
+              </button>
+              <button
+                type="button"
+                className="font-body cursor-pointer"
+                style={{
+                  fontSize: 11,
+                  padding: '5px 10px',
+                  borderRadius: 6,
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--color-text-secondary)',
+                }}
+                onClick={() => { setShowReExtract(false); setReExtractInstructions('') }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

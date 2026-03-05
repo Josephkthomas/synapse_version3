@@ -3,7 +3,7 @@ import {
   Type, Globe, FileText, Mic, Link, Upload, Sparkles, Loader,
   GripVertical, Zap, type LucideIcon,
 } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import { useExtraction } from '../hooks/useExtraction'
@@ -356,8 +356,18 @@ function ExtractionSettings({
 
 // ─── Main CaptureView ─────────────────────────────────────────────────────────
 
+interface ReExtractSource {
+  id: string
+  title?: string
+  content: string
+  sourceType?: string
+  sourceUrl?: string
+  customInstructions?: string
+}
+
 export function CaptureView() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { session } = useAuth()
   const { profile, extractionSettings, anchors } = useSettings()
   const { state, start, approveAndSave, reExtract, reset } = useExtraction()
@@ -412,6 +422,23 @@ export function CaptureView() {
       setAnchorEmphasis(extractionSettings.default_anchor_emphasis as ExtractionConfig['anchorEmphasis'] ?? 'standard')
     }
   }, [extractionSettings])
+
+  // ── Pre-fill from re-extract navigation state ───────────────────────────
+  const reExtractHandled = useRef(false)
+  useEffect(() => {
+    if (reExtractHandled.current) return
+    const navState = location.state as { reExtractSource?: ReExtractSource } | null
+    if (!navState?.reExtractSource) return
+    reExtractHandled.current = true
+    const src = navState.reExtractSource
+    // Pre-fill transcript mode with source content
+    setCaptureMode('transcript')
+    setMeetingTitle(src.title ?? '')
+    setTranscriptContent(src.content)
+    if (src.customInstructions) setCustomGuidance(src.customInstructions)
+    // Clear navigation state so it doesn't persist on refresh
+    window.history.replaceState({}, '')
+  }, [location.state])
 
   // ── Drag-to-resize (mirrors HomeView) ────────────────────────────────────
   const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
